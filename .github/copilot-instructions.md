@@ -24,7 +24,7 @@ Zerobus Service
 | `src/Zerobus/Native/`             | Internal P/Invoke layer — `NativeBindings.cs`, `NativeInterop.cs`, `HeadersProviderBridge.cs` |
 | `tests/Zerobus.Tests/`            | Unit tests (NUnit, no native library needed)                                                  |
 | `tests/Zerobus.IntegrationTests/` | Integration tests (NUnit + mock gRPC server, requires native library)                         |
-| `examples/`                       | Example apps: `JsonSingle/`, `JsonBatch/`, `ProtoSingle/`                                     |
+| `examples/`                       | Example apps: `JsonSingle/`, `JsonBatch/`, `ProtoSingle/`, `AsyncIngestion/`                  |
 | `zerobus-ffi/`                    | Rust FFI crate that produces the native shared library                                        |
 | `build_native.sh`                 | Script to build the Rust FFI shared library for the current platform                          |
 
@@ -60,6 +60,15 @@ Zerobus Service
 - Use UTF-8 string literals (`"..."u8.ToArray()`) for byte array test data.
 - File-scoped namespaces (no braces around the entire file).
 - One type per file, file name matches type name.
+
+### Async Patterns
+
+- Use `async`/`await` for I/O-bound operations.
+- All async methods accept `CancellationToken cancellationToken = default` as the last parameter.
+- Use `Task.Run()` to offload blocking native calls to the thread pool (since native FFI calls are synchronous).
+- Async method names end with `Async` suffix (e.g., `IngestRecordAsync`, `FlushAsync`).
+- Provide both sync and async variants for user flexibility.
+- Use `ReadOnlyMemory<byte>` for async protobuf ingestion to avoid unnecessary copies.
 
 ### Naming
 
@@ -105,6 +114,8 @@ Zerobus Service
 - **Headers provider bridge:** `IHeadersProvider` → `HeadersProviderBridge` → native function pointer callback. A `GCHandle` pins the bridge for the stream's lifetime.
 - **Config conversion:** Managed `StreamConfigurationOptions` → `CStreamConfigurationOptions` (native struct) via `NativeInterop.ConvertConfig()`.
 - **Thread safety:** Both `ZerobusSdk` and `ZerobusStream` are thread-safe per the Rust core guarantees.
+- **Async over sync:** Async methods use `Task.Run()` to offload blocking native FFI calls to the thread pool, enabling proper async/await patterns without blocking the calling thread.
+- **Cancellation:** Async methods support `CancellationToken` for cooperative cancellation. Note that cancellation stops waiting but doesn't prevent the record from being ingested.
 
 ## CI/CD
 

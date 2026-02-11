@@ -97,9 +97,9 @@ using var stream = sdk.CreateStreamWithHeadersProvider(
 
 An active bidirectional gRPC stream for record ingestion. Thread-safe.
 
-#### `IngestRecord`
+#### `IngestRecord` (sync)
 
-Ingests a single record and returns its offset.
+Ingests a single record and returns its offset immediately (acknowledgment happens in background).
 
 ```csharp
 // JSON
@@ -110,7 +110,24 @@ byte[] protoBytes = myMessage.ToByteArray();
 long offset = stream.IngestRecord(protoBytes);
 ```
 
-#### `IngestRecords`
+#### `IngestRecordAsync` (async)
+
+Asynchronously ingests a single record and waits for server acknowledgment before returning.
+
+```csharp
+// JSON
+long offset = await stream.IngestRecordAsync("""{"field": "value"}""");
+
+// Protobuf with cancellation
+using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+long offset = await stream.IngestRecordAsync(protoBytes, cts.Token);
+
+// ReadOnlyMemory<byte> for zero-copy scenarios
+ReadOnlyMemory<byte> data = GetData();
+long offset = await stream.IngestRecordAsync(data);
+```
+
+#### `IngestRecords` (sync)
 
 Ingests a batch of records and returns one offset for the whole batch.
 
@@ -122,7 +139,24 @@ string[] records = [
 long batchOffset = stream.IngestRecords(records);
 ```
 
-#### `WaitForOffset`
+#### `IngestRecordsAsync` (async)
+
+Asynchronously ingests a batch of records and waits for acknowledgment.
+
+```csharp
+string[] records = [
+    """{"device": "sensor-001", "temp": 20}""",
+    """{"device": "sensor-002", "temp": 21}""",
+];
+long batchOffset = await stream.IngestRecordsAsync(records);
+
+// With cancellation
+using var cts = new CancellationTokenSource();
+byte[][] protoRecords = GetProtoRecords();
+long offset = await stream.IngestRecordsAsync(protoRecords, cts.Token);
+```
+
+#### `WaitForOffset` (sync)
 
 Blocks until a specific offset is acknowledged by the server.
 
@@ -130,12 +164,36 @@ Blocks until a specific offset is acknowledged by the server.
 stream.WaitForOffset(offset);
 ```
 
-#### `Flush`
+#### `WaitForOffsetAsync` (async)
+
+Asynchronously waits for a specific offset to be acknowledged.
+
+```csharp
+await stream.WaitForOffsetAsync(offset);
+
+// With cancellation
+using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+await stream.WaitForOffsetAsync(offset, cts.Token);
+```
+
+#### `Flush` (sync)
 
 Blocks until all pending records are acknowledged.
 
 ```csharp
 stream.Flush();
+```
+
+#### `FlushAsync` (async)
+
+Asynchronously waits until all pending records are acknowledged.
+
+```csharp
+await stream.FlushAsync();
+
+// With cancellation
+using var cts = new CancellationTokenSource();
+await stream.FlushAsync(cts.Token);
 ```
 
 #### `GetUnackedRecords`
@@ -221,13 +279,34 @@ catch (ZerobusException ex)
 
 ## Concurrent Ingestion
 
-The stream is thread-safe. Use `Parallel.ForEachAsync` or `Task.Run` for throughput:
+The stream is thread-safe. Both synchronous and asynchronous methods can be called concurrently.
+
+### Using Async Methods (Recommended)
+
+Use the async methods with `Task.WhenAll` or `Parallel.ForEachAsync` for concurrent ingestion with automatic acknowledgment:
+
+```csharp
+// Concurrent async ingestion
+var tasks = records.Select(record => stream.IngestRecordAsync(record));
+long[] offsets = await Task.WhenAll(tasks);
+
+// With Parallel.ForEachAsync
+await Parallel.ForEachAsync(records, async (record, ct) =>
+{
+    long offset = await stream.IngestRecordAsync(record, ct);
+    Console.WriteLine($"Record ingested at offset {offset}");
+});
+```
+
+### Using Sync Methods
+
+For scenarios where you need more control over the ingestion and acknowledgment phases:
 
 ```csharp
 await Parallel.ForEachAsync(records, async (record, ct) =>
 {
     long offset = stream.IngestRecord(record);
-    stream.WaitForOffset(offset);
+    await stream.WaitForOffsetAsync(offset, ct);
 });
 ```
 
@@ -340,7 +419,8 @@ dotnet/
 └── examples/
     ├── JsonSingle/                            # Single JSON record ingestion
     ├── JsonBatch/                             # Batch JSON record ingestion
-    └── ProtoSingle/                           # Single protobuf record ingestion
+    ├── ProtoSingle/                           # Single protobuf record ingestion
+    └── AsyncIngestion/                        # Async ingestion patterns
 ```
 
 ## Architecture
