@@ -106,6 +106,18 @@ Zerobus Service
 - **Config conversion:** Managed `StreamConfigurationOptions` → `CStreamConfigurationOptions` (native struct) via `NativeInterop.ConvertConfig()`.
 - **Thread safety:** Both `ZerobusSdk` and `ZerobusStream` are thread-safe per the Rust core guarantees.
 
+## CI/CD
+
+- **Workflow:** `.github/workflows/ci.yml`
+- **Triggers:** Pull requests and pushes to `main`.
+- **Concurrency:** Single group with cancel-in-progress to keep only the latest run.
+- **Jobs:** `lint`, `build`, `test`, `integration` run in parallel.
+- **Lint:** `dotnet format` verify-only (no changes) with `SkipNativeBuild=true`.
+- **Build:** `dotnet build Zerobus.slnx` (native build enabled).
+- **Unit tests:** `dotnet test tests/Zerobus.Tests/Zerobus.Tests.csproj` with `SkipNativeBuild=true`.
+- **Integration tests:** `dotnet test tests/Zerobus.IntegrationTests/Zerobus.IntegrationTests.csproj` (native build enabled).
+- **Rust caching:** Caches `~/.cargo/registry`, `~/.cargo/git`, and `zerobus-ffi/target` keyed by `zerobus-ffi/Cargo.lock`.
+
 ## Commit Convention
 
 This project uses **Conventional Commits**. All commit messages must follow this format:
