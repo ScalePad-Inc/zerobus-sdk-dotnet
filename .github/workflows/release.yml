@@ -1,0 +1,207 @@
+name: release
+
+on:
+    push:
+        tags:
+            - "v*.*.*"
+
+# Set top-level permissions to restrictive defaults
+permissions:
+    contents: read
+
+env:
+    DOTNET_NOLOGO: true
+    DOTNET_CLI_TELEMETRY_OPTOUT: 1
+
+jobs:
+    build-native:
+        name: build-native-${{ matrix.os }}-${{ matrix.arch }}
+        runs-on: ${{ matrix.runner }}
+        strategy:
+            matrix:
+                include:
+                    # Linux builds
+                    - os: linux
+                      arch: x64
+                      runner: ubuntu-latest
+                      rust-target: x86_64-unknown-linux-gnu
+                      rid: linux-x64
+                    - os: linux
+                      arch: arm64
+                      runner: ubuntu-latest
+                      rust-target: aarch64-unknown-linux-gnu
+                      rid: linux-arm64
+                    # macOS builds
+                    - os: macos
+                      arch: x64
+                      runner: macos-13 # Intel runner
+                      rust-target: x86_64-apple-darwin
+                      rid: osx-x64
+                    - os: macos
+                      arch: arm64
+                      runner: macos-latest # Apple Silicon runner
+                      rust-target: aarch64-apple-darwin
+                      rid: osx-arm64
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: ${{ matrix.rust-target }}
+
+            - name: Install cross-compilation tools (Linux ARM64)
+              if: matrix.os == 'linux' && matrix.arch == 'arm64'
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+            - name: Cache Rust
+              uses: actions/cache@v4
+              with:
+                  path: |
+                      ~/.cargo/registry
+                      ~/.cargo/git
+                      zerobus-ffi/target
+                  key: ${{ matrix.os }}-${{ matrix.arch }}-cargo-${{ hashFiles('zerobus-ffi/Cargo.lock') }}
+                  restore-keys: |
+                      ${{ matrix.os }}-${{ matrix.arch }}-cargo-
+
+            - name: Configure cross-compilation environment (Linux ARM64)
+              if: matrix.os == 'linux' && matrix.arch == 'arm64'
+              run: |
+                  echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+                  echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+                  echo "CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++" >> $GITHUB_ENV
+
+            - name: Build native library
+              working-directory: zerobus-ffi
+              run: cargo build --release --target ${{ matrix.rust-target }}
+
+            - name: Prepare artifact directory
+              run: |
+                  mkdir -p artifact/${{ matrix.rid }}/native
+
+            - name: Copy native library (Linux)
+              if: matrix.os == 'linux'
+              run: |
+                  cp zerobus-ffi/target/${{ matrix.rust-target }}/release/libzerobus_ffi.so \
+                     artifact/${{ matrix.rid }}/native/
+
+            - name: Copy native library (macOS)
+              if: matrix.os == 'macos'
+              run: |
+                  cp zerobus-ffi/target/${{ matrix.rust-target }}/release/libzerobus_ffi.dylib \
+                     artifact/${{ matrix.rid }}/native/
+
+            - name: Upload native library artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: native-${{ matrix.rid }}
+                  path: artifact/
+                  retention-days: 1
+
+    package:
+        name: package
+        runs-on: ubuntu-latest
+        needs: build-native
+        permissions:
+            contents: write # Required to create GitHub releases
+            packages: write # Required to publish to GitHub Packages
+            id-token: write # Required for attestation
+            attestations: write # Required for attestation
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0 # Full history for version detection
+
+            - name: Setup .NET
+              uses: actions/setup-dotnet@v4
+              with:
+                  dotnet-version: 10.0.x
+                  dotnet-quality: preview
+
+            - name: Download all native libraries
+              uses: actions/download-artifact@v4
+              with:
+                  path: downloaded-artifacts
+
+            - name: Consolidate native libraries
+              run: |
+                  mkdir -p src/Zerobus/runtimes
+                  cp -r downloaded-artifacts/native-linux-x64/linux-x64 src/Zerobus/runtimes/
+                  cp -r downloaded-artifacts/native-linux-arm64/linux-arm64 src/Zerobus/runtimes/
+                  cp -r downloaded-artifacts/native-osx-x64/osx-x64 src/Zerobus/runtimes/
+                  cp -r downloaded-artifacts/native-osx-arm64/osx-arm64 src/Zerobus/runtimes/
+
+            - name: Extract version from tag
+              id: version
+              run: |
+                  # Extract version from tag (v1.2.3 -> 1.2.3)
+                  VERSION="${GITHUB_REF#refs/tags/v}"
+                  echo "version=$VERSION" >> $GITHUB_OUTPUT
+                  echo "Building version: $VERSION"
+
+            - name: Package NuGet
+              env:
+                  SkipNativeBuild: true
+                  Version: ${{ steps.version.outputs.version }}
+                  CI: true
+              run: |
+                  dotnet pack src/Zerobus/Zerobus.csproj \
+                      --configuration Release \
+                      --output ./packages \
+                      -p:Version=${{ steps.version.outputs.version }} \
+                      -p:PackageVersion=${{ steps.version.outputs.version }} \
+                      -p:AssemblyVersion=${{ steps.version.outputs.version }} \
+                      -p:FileVersion=${{ steps.version.outputs.version }} \
+                      -p:InformationalVersion=${{ steps.version.outputs.version }}
+
+            - name: Publish to GitHub Packages
+              env:
+                  NUGET_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  dotnet nuget push packages/*.nupkg \
+                      --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+                      --api-key ${{ secrets.GITHUB_TOKEN }} \
+                      --skip-duplicate
+
+            - name: Generate attestation
+              uses: actions/attest-build-provenance@v1
+              with:
+                  subject-path: "packages/*.nupkg"
+
+            - name: Update CHANGELOG
+              id: changelog
+              uses: requarks/changelog-action@v1
+              with:
+                  token: ${{ secrets.GITHUB_TOKEN }}
+                  tag: ${{ github.ref_name }}
+                  excludeTypes: chore,docs,style,test,ci,skip-ci
+
+            - name: Add changelog to step summary
+              run: |
+                  echo "## Release Changelog" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "${{ steps.changelog.outputs.changes }}" >> $GITHUB_STEP_SUMMARY
+
+            - name: Create GitHub Release
+              uses: softprops/action-gh-release@v1
+              with:
+                  body: ${{ steps.changelog.outputs.changes }}
+                  files: |
+                      packages/*.nupkg
+                      packages/*.snupkg
+                  draft: false
+                  prerelease: false
+                  token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Upload package artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: nuget-package
+                  path: packages/*.nupkg
+                  retention-days: 30
