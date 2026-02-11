@@ -90,6 +90,87 @@ public sealed class ZerobusStream : IDisposable
         return NativeInterop.StreamIngestProtoRecord(_ptr, payload);
     }
 
+    // ── Single-record async ingestion ────────────────────────────────────
+
+    /// <summary>
+    /// Asynchronously ingests a single record, waits for acknowledgment, and returns the offset.
+    /// This method will not block the calling thread while waiting for the server to acknowledge the record.
+    /// </summary>
+    /// <param name="payload">
+    /// The record payload. Pass a <see cref="string"/> for JSON records
+    /// or a <c>byte[]</c> / <see cref="ReadOnlyMemory{T}"/> of <see cref="byte"/>
+    /// for Protocol Buffer records.
+    /// </param>
+    /// <param name="cancellationToken">
+    /// A cancellation token to observe while waiting for acknowledgment. Note that cancellation
+    /// does not prevent the record from being ingested — it only stops waiting for acknowledgment.
+    /// </param>
+    /// <returns>
+    /// A task that represents the asynchronous operation. The task result contains
+    /// the offset of the ingested record after it has been acknowledged by the server.
+    /// </returns>
+    /// <exception cref="ZerobusException">Thrown if ingestion or acknowledgment fails.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown if the stream has been disposed.</exception>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown if the cancellation token is triggered before acknowledgment completes.
+    /// </exception>
+    /// <example>
+    /// <code>
+    /// // JSON
+    /// long offset = await stream.IngestRecordAsync("{\"id\": 1, \"message\": \"Hello\"}");
+    ///
+    /// // Protobuf
+    /// byte[] protoBytes = SerializeMyProto(myMessage);
+    /// long offset = await stream.IngestRecordAsync(protoBytes);
+    ///
+    /// // With cancellation
+    /// var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+    /// long offset = await stream.IngestRecordAsync(data, cts.Token);
+    /// </code>
+    /// </example>
+    public Task<long> IngestRecordAsync(string payload, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(payload);
+
+        return Task.Run(() =>
+        {
+            long offset = NativeInterop.StreamIngestJsonRecord(_ptr, payload);
+            cancellationToken.ThrowIfCancellationRequested();
+            NativeInterop.StreamWaitForOffset(_ptr, offset);
+            return offset;
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc cref="IngestRecordAsync(string, CancellationToken)"/>
+    public Task<long> IngestRecordAsync(byte[] payload, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(payload);
+
+        return Task.Run(() =>
+        {
+            long offset = NativeInterop.StreamIngestProtoRecord(_ptr, payload);
+            cancellationToken.ThrowIfCancellationRequested();
+            NativeInterop.StreamWaitForOffset(_ptr, offset);
+            return offset;
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc cref="IngestRecordAsync(string, CancellationToken)"/>
+    public Task<long> IngestRecordAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        return Task.Run(() =>
+        {
+            long offset = NativeInterop.StreamIngestProtoRecord(_ptr, payload.Span);
+            cancellationToken.ThrowIfCancellationRequested();
+            NativeInterop.StreamWaitForOffset(_ptr, offset);
+            return offset;
+        }, cancellationToken);
+    }
+
     // ── Batch ingestion ──────────────────────────────────────────────────
 
     /// <summary>
@@ -134,6 +215,88 @@ public sealed class ZerobusStream : IDisposable
         return NativeInterop.StreamIngestProtoRecords(_ptr, records);
     }
 
+    // ── Batch async ingestion ────────────────────────────────────────────
+
+    /// <summary>
+    /// Asynchronously ingests a batch of JSON records, waits for acknowledgment,
+    /// and returns the offset for the entire batch.
+    /// All records in the batch must be JSON strings.
+    /// </summary>
+    /// <param name="records">The JSON record strings to ingest.</param>
+    /// <param name="cancellationToken">
+    /// A cancellation token to observe while waiting for acknowledgment.
+    /// </param>
+    /// <returns>
+    /// A task that represents the asynchronous operation. The task result contains
+    /// the offset representing the entire batch, or -1 if the batch is empty.
+    /// </returns>
+    /// <exception cref="ZerobusException">Thrown if ingestion or acknowledgment fails.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown if the stream has been disposed.</exception>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown if the cancellation token is triggered before acknowledgment completes.
+    /// </exception>
+    /// <example>
+    /// <code>
+    /// string[] records =
+    /// [
+    ///     "{\"device\": \"sensor-001\", \"temp\": 20}",
+    ///     "{\"device\": \"sensor-002\", \"temp\": 21}",
+    /// ];
+    /// long batchOffset = await stream.IngestRecordsAsync(records);
+    /// </code>
+    /// </example>
+    public Task<long> IngestRecordsAsync(string[] records, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(records);
+
+        return Task.Run(() =>
+        {
+            long offset = NativeInterop.StreamIngestJsonRecords(_ptr, records);
+            if (offset >= 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                NativeInterop.StreamWaitForOffset(_ptr, offset);
+            }
+            return offset;
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Asynchronously ingests a batch of protobuf records, waits for acknowledgment,
+    /// and returns the offset for the entire batch.
+    /// All records in the batch must be serialised protobuf byte arrays.
+    /// </summary>
+    /// <param name="records">The protobuf record byte arrays to ingest.</param>
+    /// <param name="cancellationToken">
+    /// A cancellation token to observe while waiting for acknowledgment.
+    /// </param>
+    /// <returns>
+    /// A task that represents the asynchronous operation. The task result contains
+    /// the offset representing the entire batch, or -1 if the batch is empty.
+    /// </returns>
+    /// <exception cref="ZerobusException">Thrown if ingestion or acknowledgment fails.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown if the stream has been disposed.</exception>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown if the cancellation token is triggered before acknowledgment completes.
+    /// </exception>
+    public Task<long> IngestRecordsAsync(byte[][] records, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(records);
+
+        return Task.Run(() =>
+        {
+            long offset = NativeInterop.StreamIngestProtoRecords(_ptr, records);
+            if (offset >= 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                NativeInterop.StreamWaitForOffset(_ptr, offset);
+            }
+            return offset;
+        }, cancellationToken);
+    }
+
     // ── Acknowledgment / flush ───────────────────────────────────────────
 
     /// <summary>
@@ -175,6 +338,60 @@ public sealed class ZerobusStream : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         NativeInterop.StreamFlush(_ptr);
+    }
+
+    /// <summary>
+    /// Asynchronously waits until the server acknowledges the record at the specified offset.
+    /// This method will not block the calling thread while waiting.
+    /// </summary>
+    /// <param name="offset">The offset to wait for.</param>
+    /// <param name="cancellationToken">
+    /// A cancellation token to observe while waiting for acknowledgment.
+    /// </param>
+    /// <returns>A task that represents the asynchronous wait operation.</returns>
+    /// <exception cref="ZerobusException">Thrown if the wait fails.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown if the stream has been disposed.</exception>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown if the cancellation token is triggered before acknowledgment completes.
+    /// </exception>
+    /// <example>
+    /// <code>
+    /// long offset = stream.IngestRecord(data);
+    /// // ... do other work ...
+    /// await stream.WaitForOffsetAsync(offset);
+    /// </code>
+    /// </example>
+    public Task WaitForOffsetAsync(long offset, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return Task.Run(() => NativeInterop.StreamWaitForOffset(_ptr, offset), cancellationToken);
+    }
+
+    /// <summary>
+    /// Asynchronously waits until all pending records have been acknowledged by the server.
+    /// This ensures durability guarantees before proceeding without blocking the calling thread.
+    /// </summary>
+    /// <param name="cancellationToken">
+    /// A cancellation token to observe while waiting for acknowledgment.
+    /// </param>
+    /// <returns>A task that represents the asynchronous flush operation.</returns>
+    /// <exception cref="ZerobusException">
+    /// Thrown if the flush times out or a record fails with a non-retryable error.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">Thrown if the stream has been disposed.</exception>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown if the cancellation token is triggered before flush completes.
+    /// </exception>
+    /// <example>
+    /// <code>
+    /// await stream.FlushAsync();
+    /// Console.WriteLine("All records durably stored.");
+    /// </code>
+    /// </example>
+    public Task FlushAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return Task.Run(() => NativeInterop.StreamFlush(_ptr), cancellationToken);
     }
 
     // ── Unacknowledged records ───────────────────────────────────────────
