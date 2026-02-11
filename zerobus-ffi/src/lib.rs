@@ -321,16 +321,6 @@ pub(crate) fn validate_sdk_ptr<'a>(sdk: *mut CZerobusSdk) -> Result<&'a ZerobusS
     unsafe { Ok(&*(sdk as *const ZerobusSdk)) }
 }
 
-/// Safe wrapper to validate mutable SDK pointer
-pub(crate) fn validate_sdk_ptr_mut<'a>(
-    sdk: *mut CZerobusSdk,
-) -> Result<&'a mut ZerobusSdk, &'static str> {
-    if sdk.is_null() {
-        return Err("SDK pointer is null");
-    }
-    unsafe { Ok(&mut *(sdk as *mut ZerobusSdk)) }
-}
-
 /// Safe wrapper to validate stream pointer
 pub(crate) fn validate_stream_ptr<'a>(
     stream: *mut CZerobusStream,
