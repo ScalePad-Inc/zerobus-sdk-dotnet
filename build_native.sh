@@ -19,9 +19,9 @@ set -e
 # ─────────────────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$SCRIPT_DIR"
 FFI_DIR="$REPO_ROOT/zerobus-ffi"
-RUNTIMES_DIR="$SCRIPT_DIR/src/Zerobus/runtimes"
+RUNTIMES_DIR="$REPO_ROOT/src/Zerobus/runtimes"
 
 FORCE=0
 BUILD_ALL=0
