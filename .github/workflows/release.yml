@@ -34,7 +34,7 @@ jobs:
                     # macOS builds
                     - os: macos
                       arch: x64
-                      runner: macos-13 # Intel runner
+                      runner: macos-15-intel # Intel runner
                       rust-target: x86_64-apple-darwin
                       rid: osx-x64
                     - os: macos
