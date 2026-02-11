@@ -111,15 +111,6 @@ struct CZerobusSdk *zerobus_sdk_new(const char *zerobus_endpoint,
 void zerobus_sdk_free(struct CZerobusSdk *sdk);
 
 /**
- * Set whether to use TLS for connections (DEPRECATED)
- * This function is now a no-op. TLS is automatically controlled by the endpoint scheme:
- * - Use "https://..." for TLS-enabled endpoints
- * - Use "http://..." for non-TLS endpoints (e.g., testing with mock servers)
- * The endpoint URL passed to zerobus_sdk_new determines the TLS configuration.
- */
-void zerobus_sdk_set_use_tls(struct CZerobusSdk *sdk, bool _use_tls);
-
-/**
  * Create a stream with OAuth authentication
  * descriptor_proto_bytes: protobuf-encoded DescriptorProto (can be NULL for JSON streams)
  */
