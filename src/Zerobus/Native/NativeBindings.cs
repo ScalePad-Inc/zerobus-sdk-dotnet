@@ -1,6 +1,7 @@
 // P/Invoke bindings to the Rust FFI layer (zerobus-ffi).
 // This is the .NET equivalent of ffi.go in the Go SDK.
 
+using System.Reflection;
 using System.Runtime.InteropServices;
 
 namespace Databricks.Zerobus.Native;
@@ -123,6 +124,47 @@ internal delegate CHeaders HeadersProviderCallback(IntPtr userData);
 internal static partial class NativeMethods
 {
     private const string LibName = "zerobus_ffi";
+
+    static NativeMethods() => NativeLibrary.SetDllImportResolver(typeof(NativeMethods).Assembly, ResolveLibrary);
+
+    private static IntPtr ResolveLibrary(
+        string libraryName,
+        Assembly assembly,
+        DllImportSearchPath? searchPath)
+    {
+        if (!string.Equals(libraryName, LibName, StringComparison.Ordinal))
+        {
+            return IntPtr.Zero;
+        }
+
+        var fileName = GetLibraryFileName();
+
+        if (NativeLibrary.TryLoad(fileName, assembly, searchPath, out var handle))
+        {
+            return handle;
+        }
+
+        var baseDir = AppContext.BaseDirectory;
+        var rid = RuntimeInformation.RuntimeIdentifier;
+        var candidate = Path.Combine(baseDir, "runtimes", rid, "native", fileName);
+
+        return NativeLibrary.TryLoad(candidate, out handle) ? handle : IntPtr.Zero;
+    }
+
+    private static string GetLibraryFileName()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return "zerobus_ffi.dll";
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            return "libzerobus_ffi.dylib";
+        }
+
+        return "libzerobus_ffi.so";
+    }
 
     // --- SDK lifecycle ---
 
