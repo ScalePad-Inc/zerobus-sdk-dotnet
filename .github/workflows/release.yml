@@ -147,18 +147,18 @@ jobs:
 
             - name: Package NuGet
               env:
-                  SkipNativeBuild: true
-                  Version: ${{ steps.version.outputs.version }}
                   CI: true
               run: |
                   dotnet pack src/Zerobus/Zerobus.csproj \
                       --configuration Release \
                       --output ./packages \
+                      -p:SkipNativeBuild=true \
                       -p:Version=${{ steps.version.outputs.version }} \
                       -p:PackageVersion=${{ steps.version.outputs.version }} \
                       -p:AssemblyVersion=${{ steps.version.outputs.version }} \
                       -p:FileVersion=${{ steps.version.outputs.version }} \
-                      -p:InformationalVersion=${{ steps.version.outputs.version }}
+                      -p:InformationalVersion=${{ steps.version.outputs.version }} \
+                      -p:CI=true
 
             - name: Publish to GitHub Packages
               env:
