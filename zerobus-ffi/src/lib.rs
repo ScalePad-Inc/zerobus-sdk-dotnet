@@ -434,19 +434,6 @@ pub extern "C" fn zerobus_sdk_free(sdk: *mut CZerobusSdk) {
     }
 }
 
-/// Set whether to use TLS for connections (DEPRECATED)
-/// This function is now a no-op. TLS is automatically controlled by the endpoint scheme:
-/// - Use "https://..." for TLS-enabled endpoints
-/// - Use "http://..." for non-TLS endpoints (e.g., testing with mock servers)
-/// The endpoint URL passed to zerobus_sdk_new determines the TLS configuration.
-#[no_mangle]
-pub extern "C" fn zerobus_sdk_set_use_tls(sdk: *mut CZerobusSdk, _use_tls: bool) {
-    if let Ok(_sdk_mut) = validate_sdk_ptr_mut(sdk) {
-        // TLS configuration is now determined by the endpoint scheme at SDK creation time.
-        // This function is kept for backward compatibility but has no effect.
-    }
-}
-
 /// Create a stream with OAuth authentication
 /// descriptor_proto_bytes: protobuf-encoded DescriptorProto (can be NULL for JSON streams)
 #[no_mangle]
