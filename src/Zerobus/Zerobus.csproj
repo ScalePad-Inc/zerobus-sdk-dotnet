@@ -2,7 +2,6 @@
 
   <PropertyGroup>
     <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
-    <RuntimeIdentifiers>linux-x64;linux-arm64;osx-x64;osx-arm64</RuntimeIdentifiers>
     <RootNamespace>Databricks.Zerobus</RootNamespace>
     <AssemblyName>Databricks.Zerobus</AssemblyName>
     <PackageId>Databricks.Zerobus</PackageId>
@@ -25,11 +24,14 @@
     <!-- SourceLink: Enable source debugging from NuGet packages -->
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <!-- Symbols are embedded in the DLL; no separate .snupkg needed -->
     <DebugType>embedded</DebugType>
-    <IncludeSymbols>true</IncludeSymbols>
-    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.103" PrivateAssets="All" />
@@ -56,7 +58,7 @@
 
   <!--
     Native library references:
-    - Content items copy native libs into output under runtimes/<RID>/native/ preserving
+    - Content items copy native libs into build output under runtimes/<RID>/native/ preserving
       the directory structure so the DllImport resolver can pick the correct one at runtime.
     - None+Pack items embed them into the NuGet package under runtimes/<RID>/native/ for distribution.
   -->

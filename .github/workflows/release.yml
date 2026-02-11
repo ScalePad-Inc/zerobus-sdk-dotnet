@@ -194,7 +194,6 @@ jobs:
                   body: ${{ steps.changelog.outputs.changes }}
                   files: |
                       packages/*.nupkg
-                      packages/*.snupkg
                   draft: false
                   prerelease: false
                   token: ${{ secrets.GITHUB_TOKEN }}
