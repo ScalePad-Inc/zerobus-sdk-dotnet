@@ -389,7 +389,11 @@ pub extern "C" fn zerobus_sdk_new(
         let endpoint = unsafe { c_str_to_string(zerobus_endpoint).map_err(|e| e.to_string())? };
         let catalog_url = unsafe { c_str_to_string(unity_catalog_url).map_err(|e| e.to_string())? };
 
-        let sdk = ZerobusSdk::new(endpoint, catalog_url).map_err(|e| e.to_string())?;
+        let sdk = ZerobusSdk::builder()
+            .endpoint(endpoint)
+            .unity_catalog_url(catalog_url)
+            .build()
+            .map_err(|e| e.to_string())?;
         let boxed = Box::new(sdk);
         Ok(Box::into_raw(boxed) as *mut CZerobusSdk)
     })();
@@ -430,12 +434,16 @@ pub extern "C" fn zerobus_sdk_free(sdk: *mut CZerobusSdk) {
     }
 }
 
-/// Set whether to use TLS for connections
-/// This should be set to false when using HTTP endpoints (e.g., for testing)
+/// Set whether to use TLS for connections (DEPRECATED)
+/// This function is now a no-op. TLS is automatically controlled by the endpoint scheme:
+/// - Use "https://..." for TLS-enabled endpoints
+/// - Use "http://..." for non-TLS endpoints (e.g., testing with mock servers)
+/// The endpoint URL passed to zerobus_sdk_new determines the TLS configuration.
 #[no_mangle]
-pub extern "C" fn zerobus_sdk_set_use_tls(sdk: *mut CZerobusSdk, use_tls: bool) {
-    if let Ok(sdk_mut) = validate_sdk_ptr_mut(sdk) {
-        sdk_mut.use_tls = use_tls;
+pub extern "C" fn zerobus_sdk_set_use_tls(sdk: *mut CZerobusSdk, _use_tls: bool) {
+    if let Ok(_sdk_mut) = validate_sdk_ptr_mut(sdk) {
+        // TLS configuration is now determined by the endpoint scheme at SDK creation time.
+        // This function is kept for backward compatibility but has no effect.
     }
 }
 
