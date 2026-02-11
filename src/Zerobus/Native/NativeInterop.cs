@@ -61,12 +61,6 @@ internal static class NativeInterop
             throw ex ?? new ZerobusException("Failed to create SDK instance", isRetryable: false);
         }
 
-        // Disable TLS for HTTP endpoints (testing/mock servers)
-        if (zerobusEndpoint.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
-        {
-            NativeMethods.SdkSetUseTls(ptr, false);
-        }
-
         return ptr;
     }
 

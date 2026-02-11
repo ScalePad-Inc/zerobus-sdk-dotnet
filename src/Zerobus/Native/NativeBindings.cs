@@ -177,11 +177,6 @@ internal static partial class NativeMethods
     [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_sdk_free")]
     public static extern void SdkFree(IntPtr sdk);
 
-    [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_sdk_set_use_tls")]
-    public static extern void SdkSetUseTls(
-        IntPtr sdk,
-        [MarshalAs(UnmanagedType.U1)] bool useTls);
-
     // --- Stream creation ---
 
     [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_sdk_create_stream")]
