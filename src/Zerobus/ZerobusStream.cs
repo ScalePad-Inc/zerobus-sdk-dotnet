@@ -24,7 +24,9 @@ public sealed class ZerobusStream : IDisposable
     private bool _disposed;
 
     // Prevent the GCHandle / delegate from being collected while the native code holds a reference.
-    private readonly GCHandle _bridgeHandle;
+    // Not readonly: GCHandle is not a readonly struct, so calling Free() on a readonly field
+    // creates a defensive copy — the field is never actually mutated, causing double-free.
+    private GCHandle _bridgeHandle;
     private readonly HeadersProviderCallback? _callbackRef;
 
     internal ZerobusStream(IntPtr ptr)
@@ -443,10 +445,10 @@ public sealed class ZerobusStream : IDisposable
     /// </exception>
     public void Close()
     {
-        if (_ptr == IntPtr.Zero) return;
+        var ptr = Interlocked.Exchange(ref _ptr, IntPtr.Zero);
+        if (ptr == IntPtr.Zero) return;
 
-        var ptr = _ptr;
-        _ptr = IntPtr.Zero; // Mark as closed to prevent double-close.
+        GC.SuppressFinalize(this);
 
         try
         {
@@ -465,11 +467,11 @@ public sealed class ZerobusStream : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        if (_ptr != IntPtr.Zero)
-        {
-            var ptr = _ptr;
-            _ptr = IntPtr.Zero;
+        GC.SuppressFinalize(this);
 
+        var ptr = Interlocked.Exchange(ref _ptr, IntPtr.Zero);
+        if (ptr != IntPtr.Zero)
+        {
             try
             {
                 NativeInterop.StreamClose(ptr);
@@ -491,8 +493,23 @@ public sealed class ZerobusStream : IDisposable
         }
     }
 
-    /// <summary>Releases native resources.</summary>
-    ~ZerobusStream() => Dispose();
+    /// <summary>
+    /// Safety-net release of native memory for leaked instances.
+    /// Only frees memory — does NOT call <see cref="NativeInterop.StreamClose"/>,
+    /// which performs blocking gRPC I/O and may trigger managed callbacks on
+    /// Rust-created threads that corrupt the .NET execution context
+    /// (infinite recursion in <c>CultureInfo.CurrentUICulture</c>).
+    /// </summary>
+    ~ZerobusStream()
+    {
+        var ptr = Interlocked.Exchange(ref _ptr, IntPtr.Zero);
+        if (ptr != IntPtr.Zero)
+        {
+            NativeMethods.StreamFree(ptr);
+        }
+
+        FreeBridgeHandle();
+    }
 
     private void FreeBridgeHandle()
     {

@@ -173,13 +173,22 @@ public sealed class ZerobusSdk : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        if (_ptr != IntPtr.Zero)
+        GC.SuppressFinalize(this);
+
+        var ptr = Interlocked.Exchange(ref _ptr, IntPtr.Zero);
+        if (ptr != IntPtr.Zero)
         {
-            NativeMethods.SdkFree(_ptr);
-            _ptr = IntPtr.Zero;
+            NativeMethods.SdkFree(ptr);
         }
     }
 
-    /// <summary>Releases native resources.</summary>
-    ~ZerobusSdk() => Dispose();
+    /// <summary>Safety-net release of native memory for leaked instances.</summary>
+    ~ZerobusSdk()
+    {
+        var ptr = Interlocked.Exchange(ref _ptr, IntPtr.Zero);
+        if (ptr != IntPtr.Zero)
+        {
+            NativeMethods.SdkFree(ptr);
+        }
+    }
 }
