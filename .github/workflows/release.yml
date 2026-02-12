@@ -133,7 +133,7 @@ jobs:
                       ${{ runner.os }}-nuget-
 
             - name: Download all native libraries
-              uses: actions/download-artifact@v4
+              uses: actions/download-artifact@v7
               with:
                   path: downloaded-artifacts
 
