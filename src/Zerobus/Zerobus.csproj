@@ -3,7 +3,7 @@
   <PropertyGroup>
     <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
     <RootNamespace>ScalePad.Databricks.Zerobus</RootNamespace>
-    <AssemblyName>Databricks.Zerobus</AssemblyName>
+    <AssemblyName>ScalePad.Databricks.Zerobus</AssemblyName>
     <PackageId>ScalePad.Databricks.Zerobus</PackageId>
     <Version>0.1.0</Version>
     <Authors>Databricks</Authors>

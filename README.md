@@ -1,4 +1,4 @@
-# Databricks.Zerobus — .NET SDK
+# ScalePad.Databricks.Zerobus — .NET SDK
 
 High-performance .NET SDK for streaming data ingestion into Databricks Delta tables using the Zerobus service. Built on the same Rust core as the Go SDK, exposed via P/Invoke (C FFI bindings).
 
@@ -10,7 +10,7 @@ High-performance .NET SDK for streaming data ingestion into Databricks Delta tab
 ## Quick Start
 
 ```csharp
-using Databricks.Zerobus;
+using ScalePad.Databricks.Zerobus;
 
 // 1. Create SDK instance.
 using var sdk = new ZerobusSdk(
@@ -42,7 +42,7 @@ stream.WaitForOffset(offset);
 ### NuGet (when published)
 
 ```bash
-dotnet add package Databricks.Zerobus
+dotnet add package ScalePad.Databricks.Zerobus
 ```
 
 ### From Source
@@ -426,7 +426,7 @@ dotnet/
 ## Architecture
 
 ```
-.NET SDK (Databricks.Zerobus)
+.NET SDK (ScalePad.Databricks.Zerobus)
     ↓ P/Invoke
 Rust FFI (zerobus-ffi / libzerobus_ffi)
     ↓

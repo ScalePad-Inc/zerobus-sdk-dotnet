@@ -3,7 +3,7 @@
   <PropertyGroup>
     <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
     <RootNamespace>ScalePad.Databricks.Zerobus.IntegrationTests</RootNamespace>
-    <AssemblyName>Databricks.Zerobus.IntegrationTests</AssemblyName>
+    <AssemblyName>ScalePad.Databricks.Zerobus.IntegrationTests</AssemblyName>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
