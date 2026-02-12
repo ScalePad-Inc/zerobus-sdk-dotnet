@@ -10,6 +10,47 @@ public class IntegrationTests
 {
     private const string TestTableName = "test_catalog.test_schema.test_table";
 
+    // ── Parameter Validation ─────────────────────────────────────────
+
+    [Test]
+    public async Task CreateStream_NullTableProperties_ThrowsArgumentNullException()
+    {
+        await using var fixture = await MockServerFixture.StartAsync();
+
+        using var sdk = new ZerobusSdk(fixture.ServerUrl, "https://mock-uc.com");
+
+        Assert.Throws<ArgumentNullException>(() =>
+        {
+            sdk.CreateStream(null!, "id", "secret");
+        });
+    }
+
+    [Test]
+    public async Task CreateStream_NullClientId_ThrowsArgumentNullException()
+    {
+        await using var fixture = await MockServerFixture.StartAsync();
+
+        using var sdk = new ZerobusSdk(fixture.ServerUrl, "https://mock-uc.com");
+
+        Assert.Throws<ArgumentNullException>(() =>
+        {
+            sdk.CreateStream(new TableProperties("test_table"), null!, "secret");
+        });
+    }
+
+    [Test]
+    public async Task CreateStream_NullClientSecret_ThrowsArgumentNullException()
+    {
+        await using var fixture = await MockServerFixture.StartAsync();
+
+        using var sdk = new ZerobusSdk(fixture.ServerUrl, "https://mock-uc.com");
+
+        Assert.Throws<ArgumentNullException>(() =>
+        {
+            sdk.CreateStream(new TableProperties("test_table"), "id", null!);
+        });
+    }
+
     // ── Stream Creation ───────────────────────────────────────────────
 
     [Test]
