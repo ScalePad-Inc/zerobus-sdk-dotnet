@@ -86,6 +86,9 @@ jobs:
                   name: native-library
                   path: src/Zerobus/runtimes/
 
+            - name: List native library contents
+              run: find src/Zerobus/runtimes/ -type f | sort
+
             - name: Build
               run: dotnet build Zerobus.slnx
 
@@ -127,6 +130,9 @@ jobs:
               with:
                   name: native-library
                   path: src/Zerobus/runtimes/
+
+            - name: List native library contents
+              run: find src/Zerobus/runtimes/ -type f | sort
 
             - name: Integration tests
               run: dotnet test tests/Zerobus.IntegrationTests/Zerobus.IntegrationTests.csproj
