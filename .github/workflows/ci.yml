@@ -56,6 +56,14 @@ jobs:
                   dotnet-version: 10.0.x
                   dotnet-quality: preview
 
+            - name: Cache dotnet packages
+              uses: actions/cache@v4
+              with:
+                  path: ~/.nuget/packages
+                  key: ${{ runner.os }}-nuget-${{ hashFiles('Directory.Packages.props') }}
+                  restore-keys: |
+                      ${{ runner.os }}-nuget-
+
             - name: Install dotnet-format
               run: |
                   dotnet tool install -g dotnet-format
@@ -79,6 +87,14 @@ jobs:
               with:
                   dotnet-version: 10.0.x
                   dotnet-quality: preview
+
+            - name: Cache dotnet packages
+              uses: actions/cache@v4
+              with:
+                  path: ~/.nuget/packages
+                  key: ${{ runner.os }}-nuget-${{ hashFiles('Directory.Packages.props') }}
+                  restore-keys: |
+                      ${{ runner.os }}-nuget-
 
             - name: Download native library
               uses: actions/download-artifact@v4
@@ -106,6 +122,15 @@ jobs:
               with:
                   dotnet-version: 10.0.x
                   dotnet-quality: preview
+
+            - name: Cache dotnet packages
+              uses: actions/cache@v4
+              with:
+                  path: ~/.nuget/packages
+                  key: ${{ runner.os }}-nuget-${{ hashFiles('Directory.Packages.props') }}
+                  restore-keys: |
+                      ${{ runner.os }}-nuget-
+
             - name: Unit tests
               run: dotnet test tests/Zerobus.Tests/Zerobus.Tests.csproj
 
@@ -124,6 +149,14 @@ jobs:
               with:
                   dotnet-version: 10.0.x
                   dotnet-quality: preview
+
+            - name: Cache dotnet packages
+              uses: actions/cache@v4
+              with:
+                  path: ~/.nuget/packages
+                  key: ${{ runner.os }}-nuget-${{ hashFiles('Directory.Packages.props') }}
+                  restore-keys: |
+                      ${{ runner.os }}-nuget-
 
             - name: Download native library
               uses: actions/download-artifact@v4
