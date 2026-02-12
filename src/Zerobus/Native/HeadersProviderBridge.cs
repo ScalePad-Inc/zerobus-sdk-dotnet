@@ -3,7 +3,7 @@
 
 using System.Runtime.InteropServices;
 
-namespace Databricks.Zerobus.Native;
+namespace ScalePad.Databricks.Zerobus.Native;
 
 /// <summary>
 /// Bridges a managed <see cref="IHeadersProvider"/> to the native

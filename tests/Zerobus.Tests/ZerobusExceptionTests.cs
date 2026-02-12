@@ -1,7 +1,7 @@
-using Databricks.Zerobus;
+using ScalePad.Databricks.Zerobus;
 using NUnit.Framework;
 
-namespace Databricks.Zerobus.Tests;
+namespace ScalePad.Databricks.Zerobus.Tests;
 
 [TestFixture]
 public class ZerobusExceptionTests

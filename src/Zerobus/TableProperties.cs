@@ -1,4 +1,4 @@
-namespace Databricks.Zerobus;
+namespace ScalePad.Databricks.Zerobus;
 
 /// <summary>
 /// Contains information about the target Databricks Delta table.

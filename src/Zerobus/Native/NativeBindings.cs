@@ -4,7 +4,7 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 
-namespace Databricks.Zerobus.Native;
+namespace ScalePad.Databricks.Zerobus.Native;
 
 /// <summary>
 /// A single header key-value pair for C FFI.

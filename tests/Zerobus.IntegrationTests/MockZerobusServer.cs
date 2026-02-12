@@ -1,8 +1,8 @@
 using Grpc.Core;
 using Google.Protobuf.WellKnownTypes;
-using Databricks.Zerobus.IntegrationTests.Protos;
+using ScalePad.Databricks.Zerobus.IntegrationTests.Protos;
 
-namespace Databricks.Zerobus.IntegrationTests;
+namespace ScalePad.Databricks.Zerobus.IntegrationTests;
 
 /// <summary>
 /// The type of a mock response that can be injected into the mock server.

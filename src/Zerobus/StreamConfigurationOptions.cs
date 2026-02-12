@@ -1,4 +1,4 @@
-namespace Databricks.Zerobus;
+namespace ScalePad.Databricks.Zerobus;
 
 /// <summary>
 /// Configuration options for creating a Zerobus stream.

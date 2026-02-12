@@ -1,4 +1,4 @@
-namespace Databricks.Zerobus;
+namespace ScalePad.Databricks.Zerobus;
 
 /// <summary>
 /// Interface for providing custom authentication headers.

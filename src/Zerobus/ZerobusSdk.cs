@@ -1,6 +1,6 @@
-using Databricks.Zerobus.Native;
+using ScalePad.Databricks.Zerobus.Native;
 
-namespace Databricks.Zerobus;
+namespace ScalePad.Databricks.Zerobus;
 
 /// <summary>
 /// The main entry point for interacting with the Zerobus ingestion service.

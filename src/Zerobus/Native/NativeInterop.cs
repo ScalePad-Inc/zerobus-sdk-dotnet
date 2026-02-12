@@ -5,7 +5,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace Databricks.Zerobus.Native;
+namespace ScalePad.Databricks.Zerobus.Native;
 
 /// <summary>
 /// Provides safe, managed wrappers around the raw P/Invoke layer.

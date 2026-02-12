@@ -1,4 +1,4 @@
-using Databricks.Zerobus;
+using ScalePad.Databricks.Zerobus;
 
 // Get configuration from environment.
 var zerobusEndpoint = Environment.GetEnvironmentVariable("ZEROBUS_SERVER_ENDPOINT")

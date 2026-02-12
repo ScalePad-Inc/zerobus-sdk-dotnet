@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace Databricks.Zerobus.IntegrationTests;
+namespace ScalePad.Databricks.Zerobus.IntegrationTests;
 
 /// <summary>
 /// Simple headers provider for testing.

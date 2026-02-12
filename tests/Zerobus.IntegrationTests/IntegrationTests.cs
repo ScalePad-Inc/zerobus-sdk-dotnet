@@ -2,7 +2,7 @@ using System.Diagnostics;
 using Grpc.Core;
 using NUnit.Framework;
 
-namespace Databricks.Zerobus.IntegrationTests;
+namespace ScalePad.Databricks.Zerobus.IntegrationTests;
 
 [TestFixture]
 [Parallelizable(ParallelScope.Children)]

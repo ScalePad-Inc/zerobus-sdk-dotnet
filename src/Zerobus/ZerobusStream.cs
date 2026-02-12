@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
-using Databricks.Zerobus.Native;
+using ScalePad.Databricks.Zerobus.Native;
 
-namespace Databricks.Zerobus;
+namespace ScalePad.Databricks.Zerobus;
 
 /// <summary>
 /// Represents an active bidirectional gRPC stream for ingesting records.

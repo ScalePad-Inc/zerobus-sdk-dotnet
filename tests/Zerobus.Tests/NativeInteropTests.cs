@@ -1,8 +1,8 @@
-using Databricks.Zerobus;
-using Databricks.Zerobus.Native;
+using ScalePad.Databricks.Zerobus;
+using ScalePad.Databricks.Zerobus.Native;
 using NUnit.Framework;
 
-namespace Databricks.Zerobus.Tests;
+namespace ScalePad.Databricks.Zerobus.Tests;
 
 [TestFixture]
 public class NativeInteropTests

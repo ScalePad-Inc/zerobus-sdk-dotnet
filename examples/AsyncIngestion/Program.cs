@@ -1,4 +1,4 @@
-using Databricks.Zerobus;
+using ScalePad.Databricks.Zerobus;
 
 // Simple example demonstrating async ingestion patterns
 Console.WriteLine("=== Zerobus Async Ingestion Example ===\n");

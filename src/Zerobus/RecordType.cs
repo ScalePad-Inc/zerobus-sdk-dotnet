@@ -1,4 +1,4 @@
-namespace Databricks.Zerobus;
+namespace ScalePad.Databricks.Zerobus;
 
 /// <summary>
 /// Represents the type of records to ingest.
