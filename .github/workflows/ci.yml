@@ -35,7 +35,7 @@ jobs:
               run: bash build_native.sh
 
             - name: Upload native library
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v6
               with:
                   name: native-library
                   path: src/Zerobus/runtimes/
