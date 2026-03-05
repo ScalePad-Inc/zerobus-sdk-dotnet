@@ -516,4 +516,31 @@ public sealed class ZerobusStream : IDisposable
         if (_bridgeHandle.IsAllocated)
             _bridgeHandle.Free();
     }
+
+    /// <summary>
+    /// Returns the raw native pointer to the underlying C stream.
+    /// Internal use only.
+    /// </summary>
+    internal IntPtr NativePointer
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _ptr;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to retrieve the bridge handle and callback reference for the stream.
+    /// Internal use only.
+    /// </summary>
+    internal ZerobusStream Recreate(IntPtr newPtr)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var newStream = _bridgeHandle.IsAllocated
+            ? new ZerobusStream(newPtr, _bridgeHandle, _callbackRef!)
+            : new ZerobusStream(newPtr);
+        _disposed = true; // Mark the old stream as disposed to prevent further use.
+        return newStream;
+    }
 }

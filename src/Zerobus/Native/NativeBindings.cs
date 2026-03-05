@@ -201,6 +201,12 @@ internal static partial class NativeMethods
         ref CStreamConfigurationOptions options,
         ref CResult result);
 
+    [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_sdk_recreate_stream")]
+    public static extern IntPtr SdkRecreateStream(
+        IntPtr sdk,
+        IntPtr stream,
+        ref CResult result);
+
     [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_stream_free")]
     public static extern void StreamFree(IntPtr stream);
 
