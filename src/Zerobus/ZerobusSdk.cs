@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using ScalePad.Databricks.Zerobus.Native;
 
 namespace ScalePad.Databricks.Zerobus;
@@ -145,7 +146,7 @@ public sealed class ZerobusSdk : IDisposable
         var callback = new HeadersProviderCallback(bridge.NativeCallback);
 
         // GCHandle keeps the bridge + callback alive for the lifetime of the stream.
-        var handle = System.Runtime.InteropServices.GCHandle.Alloc(bridge);
+        var handle = GCHandle.Alloc(bridge);
 
         IntPtr streamPtr;
         try
@@ -155,7 +156,7 @@ public sealed class ZerobusSdk : IDisposable
                 tableProperties.TableName,
                 tableProperties.DescriptorProto ?? [],
                 callback,
-                System.Runtime.InteropServices.GCHandle.ToIntPtr(handle),
+                GCHandle.ToIntPtr(handle),
                 ref nativeOpts);
         }
         catch
@@ -165,6 +166,48 @@ public sealed class ZerobusSdk : IDisposable
         }
 
         return new ZerobusStream(streamPtr, handle, callback);
+    }
+
+    /// <summary>
+    /// Recreates a new bidirectional gRPC stream from an existing stream.
+    /// This is used for recovery scenarios where a stream needs to be re-established
+    /// using the existing stream's configuration and state.
+    /// </summary>
+    /// <param name="stream">The existing stream to recreate from.</param>
+    /// <returns>A new <see cref="ZerobusStream"/> ready for record ingestion.</returns>
+    /// <exception cref="ZerobusException">Thrown if the stream cannot be recreated.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown if the SDK has been disposed.</exception>
+    public ZerobusStream RecreateStream(ZerobusStream stream)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(stream);
+
+        var ptr = NativeInterop.SdkRecreateStream(_ptr, stream.NativePointer);
+        return stream.Recreate(ptr);
+    }
+
+    /// <summary>
+    /// Recreates a new bidirectional gRPC stream from an existing stream.
+    /// This is used for recovery scenarios where a stream needs to be re-established
+    /// using the existing stream's configuration and state.
+    /// </summary>
+    /// <param name="stream">The existing stream to recreate from.</param>
+    /// <param name="cancellationToken">
+    /// A cancellation token to observe while waiting for the stream to be recreated.
+    /// </param>
+    /// <returns>A new <see cref="ZerobusStream"/> ready for record ingestion.</returns>
+    /// <exception cref="ZerobusException">Thrown if the stream cannot be recreated.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown if the SDK has been disposed.</exception>
+    public Task<ZerobusStream> RecreateStreamAsync(ZerobusStream stream, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(stream);
+
+        return Task.Run(() =>
+        {
+            var ptr = NativeInterop.SdkRecreateStream(_ptr, stream.NativePointer);
+            return stream.Recreate(ptr);
+        }, cancellationToken);
     }
 
     /// <inheritdoc />

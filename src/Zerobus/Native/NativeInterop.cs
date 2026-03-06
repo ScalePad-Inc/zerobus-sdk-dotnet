@@ -137,6 +137,23 @@ internal static class NativeInterop
     }
 
     /// <summary>
+    /// Recreates a stream from an existing stream.
+    /// </summary>
+    public static IntPtr SdkRecreateStream(IntPtr sdkPtr, IntPtr streamPtr)
+    {
+        var result = new CResult();
+        var ptr = NativeMethods.SdkRecreateStream(sdkPtr, streamPtr, ref result);
+
+        if (ptr == IntPtr.Zero)
+        {
+            var ex = ToException(ref result);
+            throw ex ?? new ZerobusException("Failed to recreate stream", isRetryable: false);
+        }
+
+        return ptr;
+    }
+
+    /// <summary>
     /// Ingests a single protobuf record and returns the offset.
     /// </summary>
     public static unsafe long StreamIngestProtoRecord(IntPtr streamPtr, ReadOnlySpan<byte> data)
