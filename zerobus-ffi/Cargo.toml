@@ -12,7 +12,7 @@ databricks-zerobus-ingest-sdk = "0.5.0"
 
 # FFI helpers
 tokio = { version = "1.50", features = ["rt", "rt-multi-thread"] }
-once_cell = "1.19"
+once_cell = "1.21"
 prost = "0.13.5"
 prost-types = "0.13.5"
 async-trait = "0.1"
