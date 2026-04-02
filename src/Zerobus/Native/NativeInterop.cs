@@ -653,24 +653,29 @@ internal static class NativeInterop
 
         var callbackHandle = GCHandle.Alloc(callbackDelegate);
 
-        NativeMethods.StreamIngestJsonRecordsAsync(
-            streamPtr,
-            ptrs,
-            (nuint)records.Length,
-            callbackDelegate,
-            IntPtr.Zero);
+        try
+        {
+            NativeMethods.StreamIngestJsonRecordsAsync(
+                streamPtr,
+                ptrs,
+                (nuint)records.Length,
+                callbackDelegate,
+                IntPtr.Zero);
+        }
+        finally
+        {
+            for (int i = 0; i < handles.Length; i++)
+            {
+                if (handles[i].IsAllocated)
+                    handles[i].Free();
+            }
+        }
 
         _ = tcs.Task.ContinueWith(
             _ =>
             {
                 if (callbackHandle.IsAllocated)
                     callbackHandle.Free();
-
-                for (int i = 0; i < handles.Length; i++)
-                {
-                    if (handles[i].IsAllocated)
-                        handles[i].Free();
-                }
             },
             TaskContinuationOptions.ExecuteSynchronously);
 
