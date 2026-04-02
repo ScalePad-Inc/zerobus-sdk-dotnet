@@ -149,25 +149,12 @@ internal static class NativeInterop
     {
         var tcs = new TaskCompletionSource<IntPtr>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        // Root the delegate with a GCHandle so the GC cannot collect it before Tokio invokes it.
-        // The handle is released inside the callback once it has fired.
-        GCHandle handle = default;
-
         CreateStreamCallback callbackDelegate = (_, stream, result) =>
         {
-            try
-            {
-                ApplyResult(tcs, result, stream);
-            }
-            finally
-            {
-                // ReSharper disable AccessToModifiedClosure
-                handle.Free();
-                // ReSharper restore AccessToModifiedClosure
-            }
+            ApplyResult(tcs, result, stream);
         };
 
-        handle = GCHandle.Alloc(callbackDelegate);
+        var handle = GCHandle.Alloc(callbackDelegate);
 
         fixed (byte* descPtr = descriptorProto)
         {
@@ -182,6 +169,14 @@ internal static class NativeInterop
                 callbackDelegate,
                 IntPtr.Zero);
         }
+
+        tcs.Task.ContinueWith(
+            _ =>
+            {
+                if (handle.IsAllocated)
+                    handle.Free();
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
 
         return tcs.Task;
     }
@@ -242,22 +237,12 @@ internal static class NativeInterop
     {
         var tcs = new TaskCompletionSource<IntPtr>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        GCHandle handle = default;
         CreateStreamCallback callbackDelegate = (_, stream, result) =>
         {
-            try
-            {
-                ApplyResult(tcs, result, stream);
-            }
-            finally
-            {
-                // ReSharper disable AccessToModifiedClosure
-                handle.Free();
-                // ReSharper restore AccessToModifiedClosure
-            }
+            ApplyResult(tcs, result, stream);
         };
 
-        handle = GCHandle.Alloc(callbackDelegate);
+        var handle = GCHandle.Alloc(callbackDelegate);
 
         fixed (byte* descPtr = descriptorProto)
         {
@@ -272,6 +257,14 @@ internal static class NativeInterop
                 callbackDelegate,
                 IntPtr.Zero);
         }
+
+        tcs.Task.ContinueWith(
+            _ =>
+            {
+                if (handle.IsAllocated)
+                    handle.Free();
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
 
         return tcs.Task;
     }
@@ -306,29 +299,26 @@ internal static class NativeInterop
     {
         var tcs = new TaskCompletionSource<IntPtr>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        GCHandle handle = default;
-
         CreateStreamCallback callbackDelegate = (_, stream, result) =>
         {
-            try
-            {
-                ApplyResult(tcs, result, stream);
-            }
-            finally
-            {
-                // ReSharper disable AccessToModifiedClosure
-                handle.Free();
-                // ReSharper restore AccessToModifiedClosure
-            }
+            ApplyResult(tcs, result, stream);
         };
 
-        handle = GCHandle.Alloc(callbackDelegate);
+        var handle = GCHandle.Alloc(callbackDelegate);
 
         NativeMethods.SdkRecreateStreamAsync(
             sdkPtr,
             streamPtr,
             callbackDelegate,
             IntPtr.Zero);
+
+        tcs.Task.ContinueWith(
+            _ =>
+            {
+                if (handle.IsAllocated)
+                    handle.Free();
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
 
         return tcs.Task;
     }
@@ -349,23 +339,12 @@ internal static class NativeInterop
 
         var tcs = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        GCHandle handle = default;
-
         IngestRecordCallback callbackDelegate = (_, offset, result) =>
         {
-            try
-            {
-                ApplyResult(tcs, result, offset);
-            }
-            finally
-            {
-                // ReSharper disable AccessToModifiedClosure
-                handle.Free();
-                // ReSharper restore AccessToModifiedClosure
-            }
+            ApplyResult(tcs, result, offset);
         };
 
-        handle = GCHandle.Alloc(callbackDelegate);
+        var handle = GCHandle.Alloc(callbackDelegate);
 
         fixed (byte* dataPtr = data)
         {
@@ -376,6 +355,14 @@ internal static class NativeInterop
                 callbackDelegate,
                 IntPtr.Zero);
         }
+
+        tcs.Task.ContinueWith(
+            _ =>
+            {
+                if (handle.IsAllocated)
+                    handle.Free();
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
 
         return tcs.Task;
     }
@@ -392,29 +379,26 @@ internal static class NativeInterop
     {
         var tcs = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        GCHandle handle = default;
-
         IngestRecordCallback callbackDelegate = (_, offset, result) =>
         {
-            try
-            {
-                ApplyResult(tcs, result, offset);
-            }
-            finally
-            {
-                // ReSharper disable AccessToModifiedClosure
-                handle.Free();
-                // ReSharper restore AccessToModifiedClosure
-            }
+            ApplyResult(tcs, result, offset);
         };
 
-        handle = GCHandle.Alloc(callbackDelegate);
+        var handle = GCHandle.Alloc(callbackDelegate);
 
         NativeMethods.StreamIngestJsonRecordAsync(
             streamPtr,
             jsonData,
             callbackDelegate,
             IntPtr.Zero);
+
+        tcs.Task.ContinueWith(
+            _ =>
+            {
+                if (handle.IsAllocated)
+                    handle.Free();
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
 
         return tcs.Task;
     }
@@ -535,52 +519,42 @@ internal static class NativeInterop
         var ptrs = stackalloc byte*[records.Length];
         var lens = stackalloc nuint[records.Length];
 
-        GCHandle callbackHandle = default;
-
-        try
+        for (int i = 0; i < records.Length; i++)
         {
-            for (int i = 0; i < records.Length; i++)
-            {
-                handles[i] = GCHandle.Alloc(records[i], GCHandleType.Pinned);
-                ptrs[i] = (byte*)handles[i].AddrOfPinnedObject();
-                lens[i] = (nuint)records[i].Length;
-            }
+            handles[i] = GCHandle.Alloc(records[i], GCHandleType.Pinned);
+            ptrs[i] = (byte*)handles[i].AddrOfPinnedObject();
+            lens[i] = (nuint)records[i].Length;
+        }
 
-            IngestRecordCallback callbackDelegate = (_, offset, result) =>
+        IngestRecordCallback callbackDelegate = (_, offset, result) =>
+        {
+            ApplyResult(tcs, result, offset == -2 ? -1 : offset);
+        };
+
+        var callbackHandle = GCHandle.Alloc(callbackDelegate);
+
+        NativeMethods.StreamIngestProtoRecordsAsync(
+            streamPtr,
+            ptrs,
+            lens,
+            (nuint)records.Length,
+            callbackDelegate,
+            IntPtr.Zero);
+
+        // Ensure the callback delegate's GCHandle is freed once the operation completes.
+        tcs.Task.ContinueWith(
+            _ =>
             {
-                try
-                {
-                    if (result->Success)
-                        tcs.TrySetResult(offset == -2 ? -1 : offset);
-                    else
-                        tcs.TrySetException(ToException(result));
-                }
-                finally
-                {
-                    // ReSharper disable AccessToModifiedClosure
+                if (callbackHandle.IsAllocated)
                     callbackHandle.Free();
-                    // ReSharper restore AccessToModifiedClosure
+
+                for (int i = 0; i < handles.Length; i++)
+                {
+                    if (handles[i].IsAllocated)
+                        handles[i].Free();
                 }
-            };
-
-            callbackHandle = GCHandle.Alloc(callbackDelegate);
-
-            NativeMethods.StreamIngestProtoRecordsAsync(
-                streamPtr,
-                ptrs,
-                lens,
-                (nuint)records.Length,
-                callbackDelegate,
-                IntPtr.Zero);
-        }
-        finally
-        {
-            for (int i = 0; i < handles.Length; i++)
-            {
-                if (handles[i].IsAllocated)
-                    handles[i].Free();
-            }
-        }
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
 
         return tcs.Task;
     }
@@ -653,48 +627,40 @@ internal static class NativeInterop
         var handles = new GCHandle[records.Length];
         var ptrs = stackalloc byte*[records.Length];
 
-        GCHandle callbackHandle = default;
-
-        try
+        for (int i = 0; i < records.Length; i++)
         {
-            for (int i = 0; i < records.Length; i++)
-            {
-                var utf8 = Encoding.UTF8.GetBytes(records[i] + '\0');
-                handles[i] = GCHandle.Alloc(utf8, GCHandleType.Pinned);
-                ptrs[i] = (byte*)handles[i].AddrOfPinnedObject();
-            }
+            var utf8 = Encoding.UTF8.GetBytes(records[i] + '\0');
+            handles[i] = GCHandle.Alloc(utf8, GCHandleType.Pinned);
+            ptrs[i] = (byte*)handles[i].AddrOfPinnedObject();
+        }
 
-            IngestRecordCallback callbackDelegate = (_, offset, result) =>
+        IngestRecordCallback callbackDelegate = (_, offset, result) =>
+        {
+            ApplyResult(tcs, result, offset == -2 ? -1 : offset);
+        };
+
+        var callbackHandle = GCHandle.Alloc(callbackDelegate);
+
+        NativeMethods.StreamIngestJsonRecordsAsync(
+            streamPtr,
+            ptrs,
+            (nuint)records.Length,
+            callbackDelegate,
+            IntPtr.Zero);
+
+        tcs.Task.ContinueWith(
+            _ =>
             {
-                try
-                {
-                    ApplyResult(tcs, result, offset == -2 ? -1 : offset);
-                }
-                finally
-                {
-                    // ReSharper disable AccessToModifiedClosure
+                if (callbackHandle.IsAllocated)
                     callbackHandle.Free();
-                    // ReSharper restore AccessToModifiedClosure
+
+                for (int i = 0; i < handles.Length; i++)
+                {
+                    if (handles[i].IsAllocated)
+                        handles[i].Free();
                 }
-            };
-
-            callbackHandle = GCHandle.Alloc(callbackDelegate);
-
-            NativeMethods.StreamIngestJsonRecordsAsync(
-                streamPtr,
-                ptrs,
-                (nuint)records.Length,
-                callbackDelegate,
-                IntPtr.Zero);
-        }
-        finally
-        {
-            for (int i = 0; i < handles.Length; i++)
-            {
-                if (handles[i].IsAllocated)
-                    handles[i].Free();
-            }
-        }
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
 
         return tcs.Task;
     }
@@ -708,29 +674,26 @@ internal static class NativeInterop
     {
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        GCHandle handle = default;
-
         VoidOperationCallback callbackDelegate = (_, result) =>
         {
-            try
-            {
-                ApplyResult(tcs, result);
-            }
-            finally
-            {
-                // ReSharper disable AccessToModifiedClosure
-                handle.Free();
-                // ReSharper restore AccessToModifiedClosure
-            }
+            ApplyResult(tcs, result);
         };
 
-        handle = GCHandle.Alloc(callbackDelegate);
+        var handle = GCHandle.Alloc(callbackDelegate);
 
         NativeMethods.StreamWaitForOffsetAsync(
             streamPtr,
             offset,
             callbackDelegate,
             IntPtr.Zero);
+
+        tcs.Task.ContinueWith(
+            _ =>
+            {
+                if (handle.IsAllocated)
+                    handle.Free();
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
 
         return tcs.Task;
     }
@@ -768,28 +731,25 @@ internal static class NativeInterop
     {
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        GCHandle handle = default;
-
         VoidOperationCallback callbackDelegate = (_, result) =>
         {
-            try
-            {
-                ApplyResult(tcs, result);
-            }
-            finally
-            {
-                // ReSharper disable AccessToModifiedClosure
-                handle.Free();
-                // ReSharper restore AccessToModifiedClosure
-            }
+            ApplyResult(tcs, result);
         };
 
-        handle = GCHandle.Alloc(callbackDelegate);
+        var handle = GCHandle.Alloc(callbackDelegate);
 
         NativeMethods.StreamFlushAsync(
             streamPtr,
             callbackDelegate,
             IntPtr.Zero);
+
+        tcs.Task.ContinueWith(
+            _ =>
+            {
+                if (handle.IsAllocated)
+                    handle.Free();
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
 
         return tcs.Task;
     }
@@ -843,28 +803,25 @@ internal static class NativeInterop
     {
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        GCHandle handle = default;
-
         VoidOperationCallback callbackDelegate = (_, result) =>
         {
-            try
-            {
-                ApplyResult(tcs, result);
-            }
-            finally
-            {
-                // ReSharper disable AccessToModifiedClosure
-                handle.Free();
-                // ReSharper restore AccessToModifiedClosure
-            }
+            ApplyResult(tcs, result);
         };
 
-        handle = GCHandle.Alloc(callbackDelegate);
+        var handle = GCHandle.Alloc(callbackDelegate);
 
         NativeMethods.StreamCloseAsync(
             streamPtr,
             callbackDelegate,
             IntPtr.Zero);
+
+        tcs.Task.ContinueWith(
+            _ =>
+            {
+                if (handle.IsAllocated)
+                    handle.Free();
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
 
         return tcs.Task;
     }
