@@ -360,7 +360,15 @@ public sealed class ZerobusStream : IDisposable, IAsyncDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        Dispose(true);
+        try
+        {
+            Dispose(true);
+        }
+        catch (ZerobusException)
+        {
+            // Suppress during dispose — users should call Close() explicitly
+            // if they need to observe the error.
+        }
         GC.SuppressFinalize(this);
     }
 
@@ -371,7 +379,20 @@ public sealed class ZerobusStream : IDisposable, IAsyncDisposable
         if (_disposed != 0)
             return ValueTask.CompletedTask;
 
-        return new ValueTask(CloseAsync());
+        return new ValueTask(InnerCloseAsync());
+        async Task InnerCloseAsync()
+        {
+            try
+            {
+                await CloseAsync().ConfigureAwait(false);
+            }
+            catch (ZerobusException)
+            {
+                // Suppress during dispose — users should call Close() explicitly
+                // if they need to observe the error.
+            }
+            GC.SuppressFinalize(this);
+        }
     }
 
     private void Dispose(bool disposing)
