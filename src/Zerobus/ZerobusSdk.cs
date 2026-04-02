@@ -245,20 +245,45 @@ public sealed class ZerobusSdk : IDisposable
         // This handle keeps the bridge + headersCallback alive until the task completes.
         var bridgeHandle = GCHandle.Alloc(bridge);
 
+        var nativeTask = NativeInterop.SdkCreateStreamWithHeadersProviderAsync(
+            _ptr,
+            tableProperties.TableName,
+            tableProperties.DescriptorProto ?? [],
+            headersCallback,
+            GCHandle.ToIntPtr(bridgeHandle),
+            ref nativeOpts);
+
         IntPtr streamPtr;
         try
         {
-            streamPtr = await NativeInterop.SdkCreateStreamWithHeadersProviderAsync(
-                _ptr,
-                tableProperties.TableName,
-                tableProperties.DescriptorProto ?? [],
-                headersCallback,
-                GCHandle.ToIntPtr(bridgeHandle),
-                ref nativeOpts).WaitAsync(cancellationToken).ConfigureAwait(false);
+            streamPtr = await nativeTask.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch
         {
-            bridgeHandle.Free();
+            // Cancellation stops waiting but does NOT cancel the native operation — Rust
+            // may still invoke the headers callback via headersUserData (the GCHandle).
+            // Defer cleanup to when the native task actually completes so we never free
+            // the GCHandle while Rust still holds a pointer to it.
+            _ = nativeTask.ContinueWith(
+                t =>
+                {
+                    try
+                    {
+                        // If native creation succeeded but we're not returning the stream
+                        // (e.g. caller was cancelled), free the orphaned native stream handle.
+                        if (t.IsCompletedSuccessfully && t.Result != IntPtr.Zero)
+                            NativeMethods.StreamFree(t.Result);
+                    }
+                    finally
+                    {
+                        // Always free the bridge handle once the native task is done —
+                        // regardless of whether it succeeded or faulted, Rust will no
+                        // longer invoke the headers callback after this point.
+                        if (bridgeHandle.IsAllocated)
+                            bridgeHandle.Free();
+                    }
+                },
+                TaskContinuationOptions.ExecuteSynchronously);
             throw;
         }
 
