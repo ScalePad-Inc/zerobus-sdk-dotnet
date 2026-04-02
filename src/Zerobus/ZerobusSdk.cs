@@ -109,6 +109,45 @@ public sealed class ZerobusSdk : IDisposable
     }
 
     /// <summary>
+    /// Asynchronously creates a new bidirectional gRPC stream for ingesting records into a Databricks table.
+    /// Uses OAuth 2.0 client credentials flow for authentication.
+    /// </summary>
+    /// <param name="tableProperties">Table properties including name and optional protobuf descriptor.</param>
+    /// <param name="clientId">OAuth 2.0 client ID.</param>
+    /// <param name="clientSecret">OAuth 2.0 client secret.</param>
+    /// <param name="options">Stream configuration options. Pass <c>null</c> or omit to use defaults.</param>
+    /// <returns>
+    /// A <see cref="Task{ZerobusStream}"/> that completes with a new stream ready for ingestion.
+    /// </returns>
+    /// <exception cref="ZerobusException">
+    /// Thrown if the stream cannot be created (auth failure, invalid table, etc.).
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">Thrown if the SDK has been disposed.</exception>
+    public async Task<ZerobusStream> CreateStreamAsync(
+        TableProperties tableProperties,
+        string clientId,
+        string clientSecret,
+        StreamConfigurationOptions? options = null)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(tableProperties);
+        ArgumentNullException.ThrowIfNull(clientId);
+        ArgumentNullException.ThrowIfNull(clientSecret);
+
+        var nativeOpts = NativeInterop.ConvertConfig(options);
+
+        var streamPtr = await NativeInterop.SdkCreateStreamAsync(
+            _ptr,
+            tableProperties.TableName,
+            tableProperties.DescriptorProto ?? [],
+            clientId,
+            clientSecret,
+            ref nativeOpts).ConfigureAwait(false);
+
+        return new ZerobusStream(streamPtr);
+    }
+
+    /// <summary>
     /// Creates a new bidirectional gRPC stream using a custom headers provider.
     /// Use this for custom authentication logic (managed identity, vaults, etc.).
     /// </summary>
@@ -169,6 +208,64 @@ public sealed class ZerobusSdk : IDisposable
     }
 
     /// <summary>
+    /// Asynchronously creates a new bidirectional gRPC stream using a custom headers provider.
+    /// Returns immediately; the returned task completes on a Tokio runtime thread when
+    /// stream creation succeeds or fails.
+    /// </summary>
+    /// <param name="tableProperties">Table properties including name and optional protobuf descriptor.</param>
+    /// <param name="headersProvider">Custom implementation of <see cref="IHeadersProvider"/>.</param>
+    /// <param name="options">
+    /// Stream configuration options. Pass <c>null</c> or omit to use defaults.
+    /// </param>
+    /// <param name="cancellationToken">Token to cancel waiting for the result.</param>
+    /// <returns>
+    /// A <see cref="Task{ZerobusStream}"/> that completes with a new stream ready for ingestion.
+    /// </returns>
+    /// <exception cref="ZerobusException">
+    /// Thrown if the stream cannot be created (headers provider error, network issues, etc.).
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">Thrown if the SDK has been disposed.</exception>
+    public async Task<ZerobusStream> CreateStreamWithHeadersProviderAsync(
+        TableProperties tableProperties,
+        IHeadersProvider headersProvider,
+        StreamConfigurationOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(tableProperties);
+        ArgumentNullException.ThrowIfNull(headersProvider);
+
+        var nativeOpts = NativeInterop.ConvertConfig(options);
+
+        // Create the callback bridge. Root both the bridge and the completion handle
+        // in a GCHandle so neither is collected before the Tokio callback fires.
+        var bridge = new HeadersProviderBridge(headersProvider);
+        var headersCallback = new HeadersProviderCallback(bridge.NativeCallback);
+
+        // This handle keeps the bridge + headersCallback alive until the task completes.
+        var bridgeHandle = GCHandle.Alloc(bridge);
+
+        IntPtr streamPtr;
+        try
+        {
+            streamPtr = await NativeInterop.SdkCreateStreamWithHeadersProviderAsync(
+                _ptr,
+                tableProperties.TableName,
+                tableProperties.DescriptorProto ?? [],
+                headersCallback,
+                GCHandle.ToIntPtr(bridgeHandle),
+                ref nativeOpts).WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            bridgeHandle.Free();
+            throw;
+        }
+
+        return new ZerobusStream(streamPtr, bridgeHandle, headersCallback);
+    }
+
+    /// <summary>
     /// Recreates a new bidirectional gRPC stream from an existing stream.
     /// This is used for recovery scenarios where a stream needs to be re-established
     /// using the existing stream's configuration and state.
@@ -187,27 +284,38 @@ public sealed class ZerobusSdk : IDisposable
     }
 
     /// <summary>
-    /// Recreates a new bidirectional gRPC stream from an existing stream.
-    /// This is used for recovery scenarios where a stream needs to be re-established
-    /// using the existing stream's configuration and state.
+    /// Asynchronously recreates a new bidirectional gRPC stream from an existing stream.
+    /// Returns immediately; the returned task completes on a Tokio runtime thread when
+    /// recreation succeeds or fails.
     /// </summary>
     /// <param name="stream">The existing stream to recreate from.</param>
-    /// <param name="cancellationToken">
-    /// A cancellation token to observe while waiting for the stream to be recreated.
-    /// </param>
-    /// <returns>A new <see cref="ZerobusStream"/> ready for record ingestion.</returns>
+    /// <param name="cancellationToken">Token to cancel waiting for the result.</param>
+    /// <returns>
+    /// A <see cref="Task{ZerobusStream}"/> that completes with a new stream ready for ingestion.
+    /// </returns>
     /// <exception cref="ZerobusException">Thrown if the stream cannot be recreated.</exception>
     /// <exception cref="ObjectDisposedException">Thrown if the SDK has been disposed.</exception>
-    public Task<ZerobusStream> RecreateStreamAsync(ZerobusStream stream, CancellationToken cancellationToken = default)
+    public async Task<ZerobusStream> RecreateStreamAsync(
+        ZerobusStream stream,
+        CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(stream);
 
-        return Task.Run(() =>
+        var ptr = await NativeInterop.SdkRecreateStreamAsync(_ptr, stream.NativePointer)
+            .WaitAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return stream.Recreate(ptr);
+    }
+
+    private void Free()
+    {
+        var ptr = Interlocked.Exchange(ref _ptr, IntPtr.Zero);
+        if (ptr != IntPtr.Zero)
         {
-            var ptr = NativeInterop.SdkRecreateStream(_ptr, stream.NativePointer);
-            return stream.Recreate(ptr);
-        }, cancellationToken);
+            NativeMethods.SdkFree(ptr);
+        }
     }
 
     /// <inheritdoc />
@@ -216,22 +324,10 @@ public sealed class ZerobusSdk : IDisposable
         if (_disposed) return;
         _disposed = true;
 
+        Free();
         GC.SuppressFinalize(this);
-
-        var ptr = Interlocked.Exchange(ref _ptr, IntPtr.Zero);
-        if (ptr != IntPtr.Zero)
-        {
-            NativeMethods.SdkFree(ptr);
-        }
     }
 
     /// <summary>Safety-net release of native memory for leaked instances.</summary>
-    ~ZerobusSdk()
-    {
-        var ptr = Interlocked.Exchange(ref _ptr, IntPtr.Zero);
-        if (ptr != IntPtr.Zero)
-        {
-            NativeMethods.SdkFree(ptr);
-        }
-    }
+    ~ZerobusSdk() => Free();
 }
