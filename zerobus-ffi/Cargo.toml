@@ -10,7 +10,7 @@ publish = false
 crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
-# Core SDK logic - use local path dependency
+# Core SDK logic - use the published crates.io dependency
 databricks-zerobus-ingest-sdk = { version="1.0.1", features = ["arrow-flight", "testing"] }
 
 # Arrow IPC for serializing/deserializing RecordBatches across the FFI boundary
