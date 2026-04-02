@@ -19,6 +19,54 @@ namespace zerobus {
 #endif  // __cplusplus
 
 /**
+ * Opaque handle for an Arrow Flight stream.
+ */
+typedef struct CArrowStream {
+  uint8_t _private[0];
+} CArrowStream;
+
+typedef struct CZerobusSdk {
+  uint8_t _private[0];
+} CZerobusSdk;
+
+/**
+ * Configuration options for Arrow Flight streams.
+ *
+ * `ipc_compression`: -1 = None, 0 = LZ4_FRAME, 1 = ZSTD
+ */
+typedef struct CArrowStreamConfigurationOptions {
+  uintptr_t max_inflight_batches;
+  bool recovery;
+  uint64_t recovery_timeout_ms;
+  uint64_t recovery_backoff_ms;
+  uint32_t recovery_retries;
+  uint64_t server_lack_of_ack_timeout_ms;
+  uint64_t flush_timeout_ms;
+  uint64_t connection_timeout_ms;
+  /**
+   * -1 = None, 0 = LZ4_FRAME, 1 = ZSTD
+   */
+  int32_t ipc_compression;
+} CArrowStreamConfigurationOptions;
+
+typedef struct CResult {
+  bool success;
+  char *error_message;
+  bool is_retryable;
+} CResult;
+
+/**
+ * Callback invoked when async Arrow stream creation completes.
+ * `stream` is NULL on error; check `result->success` for details.
+ * On success, the caller owns `stream` and must free it with `zerobus_arrow_stream_free`.
+ * `result` is valid only for the duration of the callback; do not store the pointer.
+ * The caller must NOT free `result->error_message`; Rust frees it after the callback returns.
+ */
+typedef void (*CreateArrowStreamCallback)(void *user_data,
+                                          struct CArrowStream *stream,
+                                          const struct CResult *result);
+
+/**
  * A single header key-value pair for C FFI
  */
 typedef struct CHeader {
@@ -35,15 +83,46 @@ typedef struct CHeaders {
   char *error_message;
 } CHeaders;
 
-typedef struct CZerobusSdk {
-  uint8_t _private[0];
-} CZerobusSdk;
+/**
+ * Function pointer type for the headers provider callback
+ * The callback should return a CHeaders struct
+ * The caller is responsible for freeing the returned CHeaders using zerobus_free_headers
+ */
+typedef struct CHeaders (*HeadersProviderCallback)(void *user_data);
 
-typedef struct CResult {
-  bool success;
-  char *error_message;
-  bool is_retryable;
-} CResult;
+/**
+ * Callback invoked when an async proto record ingest completes.
+ * `offset` is -1 on error; check `result->success` for details.
+ * `result` is valid only for the duration of the callback; do not store the pointer.
+ * The caller must NOT free `result->error_message`; Rust frees it after the callback returns.
+ */
+typedef void (*IngestRecordCallback)(void *user_data, int64_t offset, const struct CResult *result);
+
+/**
+ * Callback invoked when an async void operation (e.g. wait_for_offset) completes.
+ * `result` is valid only for the duration of the callback; do not store the pointer.
+ * The caller must NOT free `result->error_message`; Rust frees it after the callback returns.
+ */
+typedef void (*VoidOperationCallback)(void *user_data, const struct CResult *result);
+
+/**
+ * An array of Arrow IPC-encoded batches, returned by `zerobus_arrow_stream_get_unacked_batches`.
+ * Must be freed with `zerobus_arrow_free_batch_array`.
+ */
+typedef struct CArrowBatchArray {
+  /**
+   * Array of pointers to IPC-encoded batch bytes.
+   */
+  uint8_t **batches;
+  /**
+   * Array of byte lengths, one per batch.
+   */
+  uintptr_t *lengths;
+  /**
+   * Number of batches.
+   */
+  uintptr_t count;
+} CArrowBatchArray;
 
 typedef struct CZerobusStream {
   uint8_t _private[0];
@@ -65,11 +144,15 @@ typedef struct CStreamConfigurationOptions {
 } CStreamConfigurationOptions;
 
 /**
- * Function pointer type for the headers provider callback
- * The callback should return a CHeaders struct
- * The caller is responsible for freeing the returned CHeaders using zerobus_free_headers
+ * Callback invoked when async stream creation completes.
+ * `stream` is NULL on error; check `result->success` for details.
+ * On success, the caller owns `stream` and must free it with `zerobus_stream_free`.
+ * `result` is valid only for the duration of the callback; do not store the pointer.
+ * The caller must NOT free `result->error_message`; Rust frees it after the callback returns.
  */
-typedef struct CHeaders (*HeadersProviderCallback)(void *user_data);
+typedef void (*CreateStreamCallback)(void *user_data,
+                                     struct CZerobusStream *stream,
+                                     const struct CResult *result);
 
 /**
  * Represents a single record (either Proto or JSON)
@@ -93,6 +176,185 @@ extern "C" {
 #endif // __cplusplus
 
 /**
+ * Creates an Arrow Flight stream authenticated with OAuth client credentials.
+ *
+ * `schema_ipc_bytes` must point to Arrow IPC stream bytes encoding only the schema
+ * (write an empty IPC stream with just the schema message).
+ */
+struct CArrowStream *zerobus_sdk_create_arrow_stream(struct CZerobusSdk *sdk,
+                                                     const char *table_name,
+                                                     const uint8_t *schema_ipc_bytes,
+                                                     uintptr_t schema_ipc_len,
+                                                     const char *client_id,
+                                                     const char *client_secret,
+                                                     const struct CArrowStreamConfigurationOptions *options,
+                                                     struct CResult *result);
+
+/**
+ * Creates an Arrow Flight stream authenticated with OAuth client credentials asynchronously.
+ *
+ * Identical to `zerobus_sdk_create_arrow_stream` but non-blocking: returns immediately and
+ * invokes `callback` on a Tokio runtime thread when the operation completes.
+ *
+ * The caller must ensure `sdk` remains valid until `callback` is invoked.
+ * All byte/string pointer arguments are copied before this function returns.
+ */
+void zerobus_sdk_create_arrow_stream_async(struct CZerobusSdk *sdk,
+                                           const char *table_name,
+                                           const uint8_t *schema_ipc_bytes,
+                                           uintptr_t schema_ipc_len,
+                                           const char *client_id,
+                                           const char *client_secret,
+                                           const struct CArrowStreamConfigurationOptions *options,
+                                           CreateArrowStreamCallback callback,
+                                           void *user_data);
+
+/**
+ * Creates an Arrow Flight stream with a custom headers provider callback.
+ *
+ * `schema_ipc_bytes` must point to Arrow IPC stream bytes encoding only the schema.
+ */
+struct CArrowStream *zerobus_sdk_create_arrow_stream_with_headers_provider(struct CZerobusSdk *sdk,
+                                                                           const char *table_name,
+                                                                           const uint8_t *schema_ipc_bytes,
+                                                                           uintptr_t schema_ipc_len,
+                                                                           HeadersProviderCallback headers_callback,
+                                                                           void *user_data,
+                                                                           const struct CArrowStreamConfigurationOptions *options,
+                                                                           struct CResult *result);
+
+/**
+ * Creates an Arrow Flight stream with a custom headers provider callback asynchronously.
+ *
+ * Identical to `zerobus_sdk_create_arrow_stream_with_headers_provider` but non-blocking:
+ * returns immediately and invokes `callback` on a Tokio runtime thread when the
+ * operation completes.
+ *
+ * The caller must ensure `sdk` and the headers-provider state behind `user_data`
+ * remain valid until `callback` is invoked.
+ * All byte/string pointer arguments are copied before this function returns.
+ */
+void zerobus_sdk_create_arrow_stream_with_headers_provider_async(struct CZerobusSdk *sdk,
+                                                                 const char *table_name,
+                                                                 const uint8_t *schema_ipc_bytes,
+                                                                 uintptr_t schema_ipc_len,
+                                                                 HeadersProviderCallback headers_callback,
+                                                                 void *headers_user_data,
+                                                                 const struct CArrowStreamConfigurationOptions *options,
+                                                                 CreateArrowStreamCallback callback,
+                                                                 void *completion_user_data);
+
+/**
+ * Frees an Arrow Flight stream instance.
+ */
+void zerobus_arrow_stream_free(struct CArrowStream *stream);
+
+/**
+ * Ingests one Arrow RecordBatch supplied as Arrow IPC stream bytes.
+ *
+ * `ipc_bytes` must be a valid Arrow IPC stream (schema + one record batch).
+ * Returns the logical offset assigned to this batch, or -1 on error.
+ */
+int64_t zerobus_arrow_stream_ingest_batch(struct CArrowStream *stream,
+                                          const uint8_t *ipc_bytes,
+                                          uintptr_t ipc_len,
+                                          struct CResult *result);
+
+/**
+ * Ingests one Arrow RecordBatch asynchronously.
+ *
+ * Identical to `zerobus_arrow_stream_ingest_batch` but non-blocking: returns immediately and
+ * invokes `callback` on a Tokio runtime thread when the operation completes.
+ *
+ * `ipc_bytes` is copied before this function returns, so the buffer does not need to remain
+ * valid after the call. The caller must ensure `stream` remains valid until `callback` is invoked.
+ */
+void zerobus_arrow_stream_ingest_batch_async(struct CArrowStream *stream,
+                                             const uint8_t *ipc_bytes,
+                                             uintptr_t ipc_len,
+                                             IngestRecordCallback callback,
+                                             void *user_data);
+
+/**
+ * Waits until the server acknowledges the batch at the given logical offset.
+ */
+bool zerobus_arrow_stream_wait_for_offset(struct CArrowStream *stream,
+                                          int64_t offset,
+                                          struct CResult *result);
+
+/**
+ * Waits until the server acknowledges the Arrow batch at the given logical offset asynchronously.
+ *
+ * Identical to `zerobus_arrow_stream_wait_for_offset` but non-blocking: returns immediately and
+ * invokes `callback` on a Tokio runtime thread when the operation completes.
+ *
+ * The caller must ensure `stream` remains valid until `callback` is invoked.
+ */
+void zerobus_arrow_stream_wait_for_offset_async(struct CArrowStream *stream,
+                                                int64_t offset,
+                                                VoidOperationCallback callback,
+                                                void *user_data);
+
+/**
+ * Flushes all pending batches and waits for their acknowledgment.
+ */
+bool zerobus_arrow_stream_flush(struct CArrowStream *stream, struct CResult *result);
+
+/**
+ * Flushes all pending Arrow batches asynchronously.
+ *
+ * Identical to `zerobus_arrow_stream_flush` but non-blocking: returns immediately and
+ * invokes `callback` on a Tokio runtime thread when the operation completes.
+ *
+ * The caller must ensure `stream` remains valid until `callback` is invoked.
+ */
+void zerobus_arrow_stream_flush_async(struct CArrowStream *stream,
+                                      VoidOperationCallback callback,
+                                      void *user_data);
+
+/**
+ * Gracefully closes the stream, flushing all pending batches first.
+ */
+bool zerobus_arrow_stream_close(struct CArrowStream *stream, struct CResult *result);
+
+/**
+ * Gracefully closes the Arrow stream asynchronously, flushing all pending batches first.
+ *
+ * Identical to `zerobus_arrow_stream_close` but non-blocking: returns immediately and
+ * invokes `callback` on a Tokio runtime thread when the operation completes.
+ *
+ * The caller must ensure `stream` remains valid until `callback` is invoked.
+ * After the callback fires the stream should be freed with `zerobus_arrow_stream_free`.
+ */
+void zerobus_arrow_stream_close_async(struct CArrowStream *stream,
+                                      VoidOperationCallback callback,
+                                      void *user_data);
+
+/**
+ * Returns all unacknowledged batches from a closed or failed stream as Arrow IPC bytes.
+ *
+ * Each batch is serialized as a self-contained Arrow IPC stream (schema + one batch).
+ * The returned array must be freed with `zerobus_arrow_free_batch_array`.
+ */
+struct CArrowBatchArray zerobus_arrow_stream_get_unacked_batches(struct CArrowStream *stream,
+                                                                 struct CResult *result);
+
+/**
+ * Frees a `CArrowBatchArray` returned by `zerobus_arrow_stream_get_unacked_batches`.
+ */
+void zerobus_arrow_free_batch_array(struct CArrowBatchArray array);
+
+/**
+ * Returns whether the Arrow stream has been closed.
+ */
+bool zerobus_arrow_stream_is_closed(struct CArrowStream *stream);
+
+/**
+ * Returns the default Arrow stream configuration options.
+ */
+struct CArrowStreamConfigurationOptions zerobus_arrow_get_default_config(void);
+
+/**
  * Free headers returned from callback
  */
 void zerobus_free_headers(struct CHeaders headers);
@@ -111,6 +373,14 @@ struct CZerobusSdk *zerobus_sdk_new(const char *zerobus_endpoint,
 void zerobus_sdk_free(struct CZerobusSdk *sdk);
 
 /**
+ * Set whether to use TLS for connections.
+ *
+ * Deprecated: This function is a no-op. TLS is now controlled via the `TlsConfig`
+ * trait passed to the SDK builder. This function is retained for ABI compatibility.
+ */
+void zerobus_sdk_set_use_tls(struct CZerobusSdk *sdk, bool _use_tls);
+
+/**
  * Create a stream with OAuth authentication
  * descriptor_proto_bytes: protobuf-encoded DescriptorProto (can be NULL for JSON streams)
  */
@@ -122,6 +392,25 @@ struct CZerobusStream *zerobus_sdk_create_stream(struct CZerobusSdk *sdk,
                                                  const char *client_secret,
                                                  const struct CStreamConfigurationOptions *options,
                                                  struct CResult *result);
+
+/**
+ * Create a stream with OAuth authentication asynchronously.
+ *
+ * Identical to `zerobus_sdk_create_stream` but non-blocking: returns immediately and
+ * invokes `callback` on a Tokio runtime thread when the operation completes.
+ *
+ * The caller must ensure `sdk` remains valid until `callback` is invoked.
+ * All byte/string pointer arguments are copied before this function returns.
+ */
+void zerobus_sdk_create_stream_async(struct CZerobusSdk *sdk,
+                                     const char *table_name,
+                                     const uint8_t *descriptor_proto_bytes,
+                                     uintptr_t descriptor_proto_len,
+                                     const char *client_id,
+                                     const char *client_secret,
+                                     const struct CStreamConfigurationOptions *options,
+                                     CreateStreamCallback callback,
+                                     void *user_data);
 
 /**
  * Create a stream with a custom headers provider callback
@@ -137,12 +426,49 @@ struct CZerobusStream *zerobus_sdk_create_stream_with_headers_provider(struct CZ
                                                                        struct CResult *result);
 
 /**
+ * Create a stream with a custom headers provider callback asynchronously.
+ *
+ * Identical to `zerobus_sdk_create_stream_with_headers_provider` but non-blocking:
+ * returns immediately and invokes `callback` on a Tokio runtime thread when the
+ * operation completes.
+ *
+ * The caller must ensure `sdk` and the headers-provider state behind `user_data`
+ * remain valid until `callback` is invoked.
+ * All byte/string pointer arguments are copied before this function returns.
+ */
+void zerobus_sdk_create_stream_with_headers_provider_async(struct CZerobusSdk *sdk,
+                                                           const char *table_name,
+                                                           const uint8_t *descriptor_proto_bytes,
+                                                           uintptr_t descriptor_proto_len,
+                                                           HeadersProviderCallback headers_callback,
+                                                           void *headers_user_data,
+                                                           const struct CStreamConfigurationOptions *options,
+                                                           CreateStreamCallback callback,
+                                                           void *completion_user_data);
+
+/**
  * Recreate a stream from an existing stream
  * This is used for recovery scenarios where the stream needs to be re-established
  */
 struct CZerobusStream *zerobus_sdk_recreate_stream(struct CZerobusSdk *sdk,
                                                    struct CZerobusStream *stream,
                                                    struct CResult *result);
+
+/**
+ * Recreate a stream from an existing stream asynchronously.
+ *
+ * Identical to `zerobus_sdk_recreate_stream` but non-blocking: returns immediately and
+ * invokes `callback` on a Tokio runtime thread when the operation completes.
+ *
+ * The caller must ensure `sdk` and `stream` remain valid until `callback` is invoked.
+ * On success, the caller owns the new stream and must free it with `zerobus_stream_free`.
+ * `result` is valid only for the duration of the callback; do not store the pointer.
+ * The caller must NOT free `result->error_message`; Rust frees it after the callback returns.
+ */
+void zerobus_sdk_recreate_stream_async(struct CZerobusSdk *sdk,
+                                       struct CZerobusStream *stream,
+                                       CreateStreamCallback callback,
+                                       void *user_data);
 
 /**
  * Free a stream instance
@@ -160,6 +486,21 @@ int64_t zerobus_stream_ingest_proto_record(struct CZerobusStream *stream,
                                            struct CResult *result);
 
 /**
+ * Ingest a protobuf record asynchronously.
+ *
+ * Identical to `zerobus_stream_ingest_proto_record` but non-blocking: returns immediately and
+ * invokes `callback` on a Tokio runtime thread when the operation completes.
+ *
+ * `data` is copied before this function returns, so the buffer does not need to remain
+ * valid after the call. The caller must ensure `stream` remains valid until `callback` is invoked.
+ */
+void zerobus_stream_ingest_proto_record_async(struct CZerobusStream *stream,
+                                              const uint8_t *data,
+                                              uintptr_t data_len,
+                                              IngestRecordCallback callback,
+                                              void *user_data);
+
+/**
  * Ingest a JSON record
  * Returns the offset directly
  * Returns -1 on error
@@ -167,6 +508,20 @@ int64_t zerobus_stream_ingest_proto_record(struct CZerobusStream *stream,
 int64_t zerobus_stream_ingest_json_record(struct CZerobusStream *stream,
                                           const char *json_data,
                                           struct CResult *result);
+
+/**
+ * Ingest a JSON record asynchronously.
+ *
+ * Identical to `zerobus_stream_ingest_json_record` but non-blocking: returns immediately and
+ * invokes `callback` on a Tokio runtime thread when the operation completes.
+ *
+ * `json_data` is copied before this function returns, so the string does not need to remain
+ * valid after the call. The caller must ensure `stream` remains valid until `callback` is invoked.
+ */
+void zerobus_stream_ingest_json_record_async(struct CZerobusStream *stream,
+                                             const char *json_data,
+                                             IngestRecordCallback callback,
+                                             void *user_data);
 
 /**
  * Ingest a batch of protobuf records
@@ -180,6 +535,23 @@ int64_t zerobus_stream_ingest_proto_records(struct CZerobusStream *stream,
                                             struct CResult *result);
 
 /**
+ * Ingest a batch of protobuf records asynchronously.
+ *
+ * Identical to `zerobus_stream_ingest_proto_records` but non-blocking: returns immediately and
+ * invokes `callback` on a Tokio runtime thread when the operation completes.
+ *
+ * All record data is copied before this function returns. The caller must ensure `stream`
+ * remains valid until `callback` is invoked.
+ * `callback` receives the offset of the last record, or -1 on error, -2 if batch is empty.
+ */
+void zerobus_stream_ingest_proto_records_async(struct CZerobusStream *stream,
+                                               const uint8_t *const *records,
+                                               const uintptr_t *record_lens,
+                                               uintptr_t num_records,
+                                               IngestRecordCallback callback,
+                                               void *user_data);
+
+/**
  * Ingest a batch of JSON records
  * Returns the offset of the last record in the batch, or -1 on error
  * Returns -2 if batch is empty
@@ -190,6 +562,22 @@ int64_t zerobus_stream_ingest_json_records(struct CZerobusStream *stream,
                                            struct CResult *result);
 
 /**
+ * Ingest a batch of JSON records asynchronously.
+ *
+ * Identical to `zerobus_stream_ingest_json_records` but non-blocking: returns immediately and
+ * invokes `callback` on a Tokio runtime thread when the operation completes.
+ *
+ * All JSON strings are copied before this function returns. The caller must ensure `stream`
+ * remains valid until `callback` is invoked.
+ * `callback` receives the offset of the last record, or -1 on error, -2 if batch is empty.
+ */
+void zerobus_stream_ingest_json_records_async(struct CZerobusStream *stream,
+                                              const char *const *json_records,
+                                              uintptr_t num_records,
+                                              IngestRecordCallback callback,
+                                              void *user_data);
+
+/**
  * Wait for a specific offset to be acknowledged by the server
  */
 bool zerobus_stream_wait_for_offset(struct CZerobusStream *stream,
@@ -197,9 +585,34 @@ bool zerobus_stream_wait_for_offset(struct CZerobusStream *stream,
                                     struct CResult *result);
 
 /**
+ * Wait for a specific offset to be acknowledged by the server asynchronously.
+ *
+ * Identical to `zerobus_stream_wait_for_offset` but non-blocking: returns immediately and
+ * invokes `callback` on a Tokio runtime thread when the operation completes.
+ *
+ * The caller must ensure `stream` remains valid until `callback` is invoked.
+ */
+void zerobus_stream_wait_for_offset_async(struct CZerobusStream *stream,
+                                          int64_t offset,
+                                          VoidOperationCallback callback,
+                                          void *user_data);
+
+/**
  * Flush all pending records
  */
 bool zerobus_stream_flush(struct CZerobusStream *stream, struct CResult *result);
+
+/**
+ * Flushes all pending records asynchronously.
+ *
+ * Identical to `zerobus_stream_flush` but non-blocking: returns immediately and
+ * invokes `callback` on a Tokio runtime thread when the operation completes.
+ *
+ * The caller must ensure `stream` remains valid until `callback` is invoked.
+ */
+void zerobus_stream_flush_async(struct CZerobusStream *stream,
+                                VoidOperationCallback callback,
+                                void *user_data);
 
 /**
  * Get unacknowledged records from a closed stream
@@ -219,12 +632,25 @@ void zerobus_free_record_array(struct CRecordArray array);
 bool zerobus_stream_close(struct CZerobusStream *stream, struct CResult *result);
 
 /**
+ * Close the stream gracefully asynchronously.
+ *
+ * Identical to `zerobus_stream_close` but non-blocking: returns immediately and
+ * invokes `callback` on a Tokio runtime thread when the operation completes.
+ *
+ * The caller must ensure `stream` remains valid until `callback` is invoked.
+ * After the callback fires the stream should be freed with `zerobus_stream_free`.
+ */
+void zerobus_stream_close_async(struct CZerobusStream *stream,
+                                VoidOperationCallback callback,
+                                void *user_data);
+
+/**
  * Free error message string
  */
 void zerobus_free_error_message(char *message);
 
 /**
- * Get default configuration options
+ * Get default stream configuration options
  */
 struct CStreamConfigurationOptions zerobus_get_default_config(void);
 
