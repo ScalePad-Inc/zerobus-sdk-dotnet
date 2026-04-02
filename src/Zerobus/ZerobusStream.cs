@@ -435,9 +435,13 @@ public sealed class ZerobusStream : IDisposable, IAsyncDisposable
     {
         var disposed = Interlocked.CompareExchange(ref _disposed, 1, 0);
         ObjectDisposedException.ThrowIf(disposed != 0, this);
-        var newStream = _bridgeHandle.IsAllocated
-            ? new ZerobusStream(newPtr, _bridgeHandle, _callbackRef!)
+        var bridgeHandle = _bridgeHandle;
+        var callbackRef = _callbackRef;
+        var newStream = bridgeHandle.IsAllocated
+            ? new ZerobusStream(newPtr, bridgeHandle, callbackRef!)
             : new ZerobusStream(newPtr);
+        _ptr = IntPtr.Zero;
+        _bridgeHandle = default;
         return newStream;
     }
 }
