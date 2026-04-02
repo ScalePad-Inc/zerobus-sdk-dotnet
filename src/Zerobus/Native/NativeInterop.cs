@@ -533,13 +533,31 @@ internal static class NativeInterop
 
         var callbackHandle = GCHandle.Alloc(callbackDelegate);
 
-        NativeMethods.StreamIngestProtoRecordsAsync(
-            streamPtr,
-            ptrs,
-            lens,
-            (nuint)records.Length,
-            callbackDelegate,
-            IntPtr.Zero);
+        try
+        {
+            NativeMethods.StreamIngestProtoRecordsAsync(
+                streamPtr,
+                ptrs,
+                lens,
+                (nuint)records.Length,
+                callbackDelegate,
+                IntPtr.Zero);
+        }
+        catch
+        {
+            if (callbackHandle.IsAllocated)
+                callbackHandle.Free();
+
+            throw;
+        }
+        finally
+        {
+            for (int i = 0; i < handles.Length; i++)
+            {
+                if (handles[i].IsAllocated)
+                    handles[i].Free();
+            }
+        }
 
         // Ensure the callback delegate's GCHandle is freed once the operation completes.
         _ = tcs.Task.ContinueWith(
@@ -547,12 +565,6 @@ internal static class NativeInterop
             {
                 if (callbackHandle.IsAllocated)
                     callbackHandle.Free();
-
-                for (int i = 0; i < handles.Length; i++)
-                {
-                    if (handles[i].IsAllocated)
-                        handles[i].Free();
-                }
             },
             TaskContinuationOptions.ExecuteSynchronously);
 
