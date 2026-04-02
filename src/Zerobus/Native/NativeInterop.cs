@@ -170,7 +170,7 @@ internal static class NativeInterop
                 IntPtr.Zero);
         }
 
-        tcs.Task.ContinueWith(
+        _ = tcs.Task.ContinueWith(
             _ =>
             {
                 if (handle.IsAllocated)
@@ -258,7 +258,7 @@ internal static class NativeInterop
                 IntPtr.Zero);
         }
 
-        tcs.Task.ContinueWith(
+        _ = tcs.Task.ContinueWith(
             _ =>
             {
                 if (handle.IsAllocated)
@@ -312,7 +312,7 @@ internal static class NativeInterop
             callbackDelegate,
             IntPtr.Zero);
 
-        tcs.Task.ContinueWith(
+        _ = tcs.Task.ContinueWith(
             _ =>
             {
                 if (handle.IsAllocated)
@@ -356,7 +356,7 @@ internal static class NativeInterop
                 IntPtr.Zero);
         }
 
-        tcs.Task.ContinueWith(
+        _ = tcs.Task.ContinueWith(
             _ =>
             {
                 if (handle.IsAllocated)
@@ -392,7 +392,7 @@ internal static class NativeInterop
             callbackDelegate,
             IntPtr.Zero);
 
-        tcs.Task.ContinueWith(
+        _ = tcs.Task.ContinueWith(
             _ =>
             {
                 if (handle.IsAllocated)
@@ -542,7 +542,7 @@ internal static class NativeInterop
             IntPtr.Zero);
 
         // Ensure the callback delegate's GCHandle is freed once the operation completes.
-        tcs.Task.ContinueWith(
+        _ = tcs.Task.ContinueWith(
             _ =>
             {
                 if (callbackHandle.IsAllocated)
@@ -648,7 +648,7 @@ internal static class NativeInterop
             callbackDelegate,
             IntPtr.Zero);
 
-        tcs.Task.ContinueWith(
+        _ = tcs.Task.ContinueWith(
             _ =>
             {
                 if (callbackHandle.IsAllocated)
@@ -687,7 +687,7 @@ internal static class NativeInterop
             callbackDelegate,
             IntPtr.Zero);
 
-        tcs.Task.ContinueWith(
+        _ = tcs.Task.ContinueWith(
             _ =>
             {
                 if (handle.IsAllocated)
@@ -743,7 +743,7 @@ internal static class NativeInterop
             callbackDelegate,
             IntPtr.Zero);
 
-        tcs.Task.ContinueWith(
+        _ = tcs.Task.ContinueWith(
             _ =>
             {
                 if (handle.IsAllocated)
@@ -815,7 +815,7 @@ internal static class NativeInterop
             callbackDelegate,
             IntPtr.Zero);
 
-        tcs.Task.ContinueWith(
+        _ = tcs.Task.ContinueWith(
             _ =>
             {
                 if (handle.IsAllocated)
