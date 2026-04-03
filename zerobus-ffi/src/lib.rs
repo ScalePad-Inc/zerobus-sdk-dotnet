@@ -31,6 +31,61 @@ use std::sync::Arc;
 mod tests;
 
 // ============================================================================
+// Send-safe pointer wrappers
+// ============================================================================
+
+/// A `*const T` wrapper that is [`Send`], allowing raw pointers to cross
+/// async / thread boundaries without converting to `usize`.
+///
+/// # Safety
+/// The caller must guarantee that:
+/// - The pointed-to data remains valid for the duration of use across the
+///   thread boundary.
+/// - Access to the pointed-to data is properly synchronised.
+#[derive(Clone, Copy)]
+struct SendPtr<T>(*const T);
+unsafe impl<T> Send for SendPtr<T> {}
+
+#[allow(clippy::wrong_self_convention)]
+impl<T> SendPtr<T> {
+    /// Dereference the pointer to a shared reference.
+    ///
+    /// # Safety
+    /// The pointer must be non-null, properly aligned, and the pointee must
+    /// be alive for the lifetime of the returned reference.
+    unsafe fn as_ref<'a>(self) -> &'a T {
+        unsafe { &*self.0 }
+    }
+}
+
+/// A `*mut T` wrapper that is [`Send`], allowing mutable raw pointers to
+/// cross async / thread boundaries without converting to `usize`.
+///
+/// # Safety
+/// Same invariants as [`SendPtr`], plus the caller must ensure exclusive
+/// access when calling [`as_mut`](Self::as_mut).
+#[derive(Clone, Copy)]
+struct SendPtrMut<T>(*mut T);
+unsafe impl<T> Send for SendPtrMut<T> {}
+
+#[allow(clippy::wrong_self_convention)]
+impl<T> SendPtrMut<T> {
+    /// Dereference the pointer to a mutable reference.
+    ///
+    /// # Safety
+    /// The pointer must be non-null, properly aligned, the pointee must be
+    /// alive, and the caller must have exclusive access.
+    unsafe fn as_mut<'a>(self) -> &'a mut T {
+        unsafe { &mut *self.0 }
+    }
+
+    /// Return the raw mutable pointer.
+    fn as_ptr(self) -> *mut T {
+        self.0
+    }
+}
+
+// ============================================================================
 // Arrow Flight FFI
 // ============================================================================
 
@@ -292,11 +347,11 @@ pub extern "C" fn zerobus_sdk_create_arrow_stream_async(
         None
     };
 
-    let sdk_addr = sdk as usize;
-    let user_data_addr = user_data as usize;
+    let sdk_ptr = SendPtr(sdk as *const ZerobusSdk);
+    let user_data_ptr = SendPtrMut(user_data);
 
     RUNTIME.spawn(async move {
-        let sdk_ref = unsafe { &*(sdk_addr as *const ZerobusSdk) };
+        let sdk_ref = unsafe { sdk_ptr.as_ref() };
         let res: Result<*mut CArrowStream, String> = async {
             let schema = ipc_bytes_to_schema(&schema_bytes).map_err(|e| e.to_string())?;
             let table_props = ArrowTableProperties {
@@ -312,11 +367,11 @@ pub extern "C" fn zerobus_sdk_create_arrow_stream_async(
         }
         .await;
 
-        let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
+        let user_data_raw = user_data_ptr.as_ptr();
         match res {
             Ok(ptr) => {
                 let result = CResult::success();
-                callback(user_data_ptr, ptr, &result);
+                callback(user_data_raw, ptr, &result);
             }
             Err(err) => {
                 let err_msg =
@@ -326,7 +381,7 @@ pub extern "C" fn zerobus_sdk_create_arrow_stream_async(
                     error_message: err_msg.into_raw(),
                     is_retryable: false,
                 };
-                callback(user_data_ptr, ptr::null_mut(), &result);
+                callback(user_data_raw, ptr::null_mut(), &result);
                 if !result.error_message.is_null() {
                     unsafe { let _ = CString::from_raw(result.error_message); }
                 }
@@ -460,12 +515,12 @@ pub extern "C" fn zerobus_sdk_create_arrow_stream_with_headers_provider_async(
         None
     };
 
-    let sdk_addr = sdk as usize;
-    let completion_user_data_addr = completion_user_data as usize;
+    let sdk_ptr = SendPtr(sdk as *const ZerobusSdk);
+    let completion_user_data_ptr = SendPtrMut(completion_user_data);
     let headers_provider = Arc::new(CallbackHeadersProvider::new(headers_callback, headers_user_data));
 
     RUNTIME.spawn(async move {
-        let sdk_ref = unsafe { &*(sdk_addr as *const ZerobusSdk) };
+        let sdk_ref = unsafe { sdk_ptr.as_ref() };
         let res: Result<*mut CArrowStream, String> = async {
             let schema = ipc_bytes_to_schema(&schema_bytes).map_err(|e| e.to_string())?;
             let table_props = ArrowTableProperties {
@@ -481,11 +536,11 @@ pub extern "C" fn zerobus_sdk_create_arrow_stream_with_headers_provider_async(
         }
         .await;
 
-        let completion_user_data_ptr = completion_user_data_addr as *mut std::ffi::c_void;
+        let completion_user_data_raw = completion_user_data_ptr.as_ptr();
         match res {
             Ok(ptr) => {
                 let result = CResult::success();
-                callback(completion_user_data_ptr, ptr, &result);
+                callback(completion_user_data_raw, ptr, &result);
             }
             Err(err) => {
                 let err_msg =
@@ -495,7 +550,7 @@ pub extern "C" fn zerobus_sdk_create_arrow_stream_with_headers_provider_async(
                     error_message: err_msg.into_raw(),
                     is_retryable: false,
                 };
-                callback(completion_user_data_ptr, ptr::null_mut(), &result);
+                callback(completion_user_data_raw, ptr::null_mut(), &result);
                 if !result.error_message.is_null() {
                     unsafe { let _ = CString::from_raw(result.error_message); }
                 }
@@ -601,26 +656,26 @@ pub extern "C" fn zerobus_arrow_stream_ingest_batch_async(
     }
 
     let bytes: Vec<u8> = unsafe { std::slice::from_raw_parts(ipc_bytes, ipc_len) }.to_vec();
-    let stream_addr = stream as usize;
-    let user_data_addr = user_data as usize;
+    let stream_ptr = SendPtr(stream as *const ZerobusArrowStream);
+    let user_data_ptr = SendPtrMut(user_data);
 
     RUNTIME.spawn(async move {
-        let stream_ref = unsafe { &*(stream_addr as *const ZerobusArrowStream) };
+        let stream_ref = unsafe { stream_ptr.as_ref() };
         let offset_res = (|| async {
             let batch = ipc_bytes_to_record_batch(&bytes)?;
             stream_ref.ingest_batch(batch).await
         })()
         .await;
 
-        let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
+        let user_data_raw = user_data_ptr.as_ptr();
         match offset_res {
             Ok(offset) => {
                 let result = CResult::success();
-                callback(user_data_ptr, offset, &result);
+                callback(user_data_raw, offset, &result);
             }
             Err(err) => {
                 let result = CResult::error(err);
-                callback(user_data_ptr, -1, &result);
+                callback(user_data_raw, -1, &result);
                 if !result.error_message.is_null() {
                     unsafe { let _ = CString::from_raw(result.error_message); }
                 }
@@ -690,22 +745,22 @@ pub extern "C" fn zerobus_arrow_stream_wait_for_offset_async(
         return;
     }
 
-    let stream_addr = stream as usize;
-    let user_data_addr = user_data as usize;
+    let stream_ptr = SendPtr(stream as *const ZerobusArrowStream);
+    let user_data_ptr = SendPtrMut(user_data);
 
     RUNTIME.spawn(async move {
-        let stream_ref = unsafe { &*(stream_addr as *const ZerobusArrowStream) };
+        let stream_ref = unsafe { stream_ptr.as_ref() };
         let res = stream_ref.wait_for_offset(offset).await;
 
-        let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
+        let user_data_raw = user_data_ptr.as_ptr();
         match res {
             Ok(()) => {
                 let result = CResult::success();
-                callback(user_data_ptr, &result);
+                callback(user_data_raw, &result);
             }
             Err(err) => {
                 let result = CResult::error(err);
-                callback(user_data_ptr, &result);
+                callback(user_data_raw, &result);
                 if !result.error_message.is_null() {
                     unsafe { let _ = CString::from_raw(result.error_message); }
                 }
@@ -773,22 +828,22 @@ pub extern "C" fn zerobus_arrow_stream_flush_async(
         return;
     }
 
-    let stream_addr = stream as usize;
-    let user_data_addr = user_data as usize;
+    let stream_ptr = SendPtr(stream as *const ZerobusArrowStream);
+    let user_data_ptr = SendPtrMut(user_data);
 
     RUNTIME.spawn(async move {
-        let stream_ref = unsafe { &*(stream_addr as *const ZerobusArrowStream) };
+        let stream_ref = unsafe { stream_ptr.as_ref() };
         let res = stream_ref.flush().await;
 
-        let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
+        let user_data_raw = user_data_ptr.as_ptr();
         match res {
             Ok(()) => {
                 let result = CResult::success();
-                callback(user_data_ptr, &result);
+                callback(user_data_raw, &result);
             }
             Err(err) => {
                 let result = CResult::error(err);
-                callback(user_data_ptr, &result);
+                callback(user_data_raw, &result);
                 if !result.error_message.is_null() {
                     unsafe { let _ = CString::from_raw(result.error_message); }
                 }
@@ -857,22 +912,22 @@ pub extern "C" fn zerobus_arrow_stream_close_async(
         return;
     }
 
-    let stream_addr = stream as usize;
-    let user_data_addr = user_data as usize;
+    let stream_ptr = SendPtrMut(stream as *mut ZerobusArrowStream);
+    let user_data_ptr = SendPtrMut(user_data);
 
     RUNTIME.spawn(async move {
-        let stream_ref = unsafe { &mut *(stream_addr as *mut ZerobusArrowStream) };
+        let stream_ref = unsafe { stream_ptr.as_mut() };
         let res = stream_ref.close().await;
 
-        let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
+        let user_data_raw = user_data_ptr.as_ptr();
         match res {
             Ok(()) => {
                 let result = CResult::success();
-                callback(user_data_ptr, &result);
+                callback(user_data_raw, &result);
             }
             Err(err) => {
                 let result = CResult::error(err);
-                callback(user_data_ptr, &result);
+                callback(user_data_raw, &result);
                 if !result.error_message.is_null() {
                     unsafe { let _ = CString::from_raw(result.error_message); }
                 }
@@ -1635,13 +1690,13 @@ pub extern "C" fn zerobus_sdk_create_stream_async(
         None
     };
 
-    // Cast raw pointers to usize so they are Send across the thread boundary.
+    // Wrap raw pointers in Send-safe newtypes for the async thread boundary.
     // Safety: the caller guarantees `sdk` stays alive until the callback fires.
-    let sdk_addr = sdk as usize;
-    let user_data_addr = user_data as usize;
+    let sdk_ptr = SendPtr(sdk as *const ZerobusSdk);
+    let user_data_ptr = SendPtrMut(user_data);
 
     RUNTIME.spawn(async move {
-        let sdk_ref = unsafe { &*(sdk_addr as *const ZerobusSdk) };
+        let sdk_ref = unsafe { sdk_ptr.as_ref() };
         let res: Result<*mut CZerobusStream, String> = async {
             let descriptor_proto = if let Some(bytes) = descriptor_bytes {
                 Some(
@@ -1666,11 +1721,11 @@ pub extern "C" fn zerobus_sdk_create_stream_async(
         }
         .await;
 
-        let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
+        let user_data_raw = user_data_ptr.as_ptr();
         match res {
             Ok(stream_ptr) => {
                 let result = CResult::success();
-                callback(user_data_ptr, stream_ptr, &result);
+                callback(user_data_raw, stream_ptr, &result);
                 // result.error_message is null for success, nothing to free.
             }
             Err(err) => {
@@ -1681,7 +1736,7 @@ pub extern "C" fn zerobus_sdk_create_stream_async(
                     error_message: err_msg.into_raw(),
                     is_retryable: false,
                 };
-                callback(user_data_ptr, ptr::null_mut(), &result);
+                callback(user_data_raw, ptr::null_mut(), &result);
                 // Free the error message now that the callback has returned.
                 if !result.error_message.is_null() {
                     unsafe {
@@ -1824,17 +1879,17 @@ pub extern "C" fn zerobus_sdk_create_stream_with_headers_provider_async(
         None
     };
 
-    // Cast raw pointers to usize so they are Send across the thread boundary.
+    // Wrap raw pointers in Send-safe newtypes for the async thread boundary.
     // Safety: the caller guarantees `sdk` and `user_data` remain alive until the callback fires.
-    let sdk_addr = sdk as usize;
-    let completion_user_data_addr = completion_user_data as usize;
+    let sdk_ptr = SendPtr(sdk as *const ZerobusSdk);
+    let completion_user_data_ptr = SendPtrMut(completion_user_data);
 
     // The headers provider wraps `headers_callback` + `user_data`; it must also outlive
     // the spawned task, so we wrap it in Arc and move it in.
     let headers_provider = Arc::new(CallbackHeadersProvider::new(headers_callback, headers_user_data));
 
     RUNTIME.spawn(async move {
-        let sdk_ref = unsafe { &*(sdk_addr as *const ZerobusSdk) };
+        let sdk_ref = unsafe { sdk_ptr.as_ref() };
         let res: Result<*mut CZerobusStream, String> = async {
             let descriptor_proto = if let Some(bytes) = descriptor_bytes {
                 Some(
@@ -1859,11 +1914,11 @@ pub extern "C" fn zerobus_sdk_create_stream_with_headers_provider_async(
         }
         .await;
 
-        let completion_user_data_ptr = completion_user_data_addr as *mut std::ffi::c_void;
+        let completion_user_data_raw = completion_user_data_ptr.as_ptr();
         match res {
             Ok(stream_ptr) => {
                 let result = CResult::success();
-                callback(completion_user_data_ptr, stream_ptr, &result);
+                callback(completion_user_data_raw, stream_ptr, &result);
             }
             Err(err) => {
                 let err_msg =
@@ -1873,7 +1928,7 @@ pub extern "C" fn zerobus_sdk_create_stream_with_headers_provider_async(
                     error_message: err_msg.into_raw(),
                     is_retryable: false,
                 };
-                callback(completion_user_data_ptr, ptr::null_mut(), &result);
+                callback(completion_user_data_raw, ptr::null_mut(), &result);
                 if !result.error_message.is_null() {
                     unsafe {
                         let _ = CString::from_raw(result.error_message);
@@ -1970,26 +2025,26 @@ pub extern "C" fn zerobus_sdk_recreate_stream_async(
         early_error!("Stream pointer is null");
     }
 
-    // Cast raw pointers to usize so they are Send across the thread boundary.
+    // Wrap raw pointers in Send-safe newtypes for the async thread boundary.
     // Safety: the caller guarantees `sdk` and `stream` stay alive until the callback fires.
-    let sdk_addr = sdk as usize;
-    let stream_addr = stream as usize;
-    let user_data_addr = user_data as usize;
+    let sdk_ptr = SendPtr(sdk as *const ZerobusSdk);
+    let stream_ptr = SendPtr(stream as *const ZerobusStream);
+    let user_data_ptr = SendPtrMut(user_data);
 
     RUNTIME.spawn(async move {
-        let sdk_ref = unsafe { &*(sdk_addr as *const ZerobusSdk) };
-        let stream_ref = unsafe { &*(stream_addr as *const ZerobusStream) };
+        let sdk_ref = unsafe { sdk_ptr.as_ref() };
+        let stream_ref = unsafe { stream_ptr.as_ref() };
         let res: Result<*mut CZerobusStream, String> = sdk_ref
             .recreate_stream(stream_ref)
             .await
             .map(|s| Box::into_raw(Box::new(s)) as *mut CZerobusStream)
             .map_err(|e| e.to_string());
 
-        let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
+        let user_data_raw = user_data_ptr.as_ptr();
         match res {
             Ok(stream_ptr) => {
                 let result = CResult::success();
-                callback(user_data_ptr, stream_ptr, &result);
+                callback(user_data_raw, stream_ptr, &result);
                 // result.error_message is null for success, nothing to free.
             }
             Err(err) => {
@@ -2000,7 +2055,7 @@ pub extern "C" fn zerobus_sdk_recreate_stream_async(
                     error_message: err_msg.into_raw(),
                     is_retryable: false,
                 };
-                callback(user_data_ptr, ptr::null_mut(), &result);
+                callback(user_data_raw, ptr::null_mut(), &result);
                 if !result.error_message.is_null() {
                     unsafe {
                         let _ = CString::from_raw(result.error_message);
@@ -2111,26 +2166,26 @@ pub extern "C" fn zerobus_stream_ingest_proto_record_async(
     // Copy the data before returning to the caller.
     let data_vec = unsafe { std::slice::from_raw_parts(data, data_len) }.to_vec();
 
-    // Cast raw pointers to usize so they are Send across the thread boundary.
+    // Wrap raw pointers in Send-safe newtypes for the async thread boundary.
     // Safety: the caller guarantees `stream` stays alive until the callback fires.
-    let stream_addr = stream as usize;
-    let user_data_addr = user_data as usize;
+    let stream_ptr = SendPtr(stream as *const ZerobusStream);
+    let user_data_ptr = SendPtrMut(user_data);
 
     RUNTIME.spawn(async move {
-        let stream_ref = unsafe { &*(stream_addr as *const ZerobusStream) };
+        let stream_ref = unsafe { stream_ptr.as_ref() };
         let offset_res = stream_ref
             .ingest_record_offset(EncodedRecord::Proto(data_vec))
             .await;
 
-        let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
+        let user_data_raw = user_data_ptr.as_ptr();
         match offset_res {
             Ok(offset) => {
                 let result = CResult::success();
-                callback(user_data_ptr, offset, &result);
+                callback(user_data_raw, offset, &result);
             }
             Err(err) => {
                 let result = CResult::error(err);
-                callback(user_data_ptr, -1, &result);
+                callback(user_data_raw, -1, &result);
                 if !result.error_message.is_null() {
                     unsafe { let _ = CString::from_raw(result.error_message); }
                 }
@@ -2227,26 +2282,26 @@ pub extern "C" fn zerobus_stream_ingest_json_record_async(
         Err(e) => early_error!(e),
     };
 
-    // Cast raw pointers to usize so they are Send across the thread boundary.
+    // Wrap raw pointers in Send-safe newtypes for the async thread boundary.
     // Safety: the caller guarantees `stream` stays alive until the callback fires.
-    let stream_addr = stream as usize;
-    let user_data_addr = user_data as usize;
+    let stream_ptr = SendPtr(stream as *const ZerobusStream);
+    let user_data_ptr = SendPtrMut(user_data);
 
     RUNTIME.spawn(async move {
-        let stream_ref = unsafe { &*(stream_addr as *const ZerobusStream) };
+        let stream_ref = unsafe { stream_ptr.as_ref() };
         let offset_res = stream_ref
             .ingest_record_offset(EncodedRecord::Json(json_str))
             .await;
 
-        let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
+        let user_data_raw = user_data_ptr.as_ptr();
         match offset_res {
             Ok(offset) => {
                 let result = CResult::success();
-                callback(user_data_ptr, offset, &result);
+                callback(user_data_raw, offset, &result);
             }
             Err(err) => {
                 let result = CResult::error(err);
-                callback(user_data_ptr, -1, &result);
+                callback(user_data_raw, -1, &result);
                 if !result.error_message.is_null() {
                     unsafe { let _ = CString::from_raw(result.error_message); }
                 }
@@ -2382,28 +2437,28 @@ pub extern "C" fn zerobus_stream_ingest_proto_records_async(
             .collect()
     };
 
-    let stream_addr = stream as usize;
-    let user_data_addr = user_data as usize;
+    let stream_ptr = SendPtr(stream as *const ZerobusStream);
+    let user_data_ptr = SendPtrMut(user_data);
 
     RUNTIME.spawn(async move {
-        let stream_ref = unsafe { &*(stream_addr as *const ZerobusStream) };
+        let stream_ref = unsafe { stream_ptr.as_ref() };
         let payloads: Vec<EncodedRecord> =
             records_vec.into_iter().map(EncodedRecord::Proto).collect();
         let offset_res = stream_ref.ingest_records_offset(payloads).await;
 
-        let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
+        let user_data_raw = user_data_ptr.as_ptr();
         match offset_res {
             Ok(Some(offset)) => {
                 let result = CResult::success();
-                callback(user_data_ptr, offset, &result);
+                callback(user_data_raw, offset, &result);
             }
             Ok(None) => {
                 let result = CResult::success();
-                callback(user_data_ptr, -2, &result);
+                callback(user_data_raw, -2, &result);
             }
             Err(err) => {
                 let result = CResult::error(err);
-                callback(user_data_ptr, -1, &result);
+                callback(user_data_raw, -1, &result);
                 if !result.error_message.is_null() {
                     unsafe { let _ = CString::from_raw(result.error_message); }
                 }
@@ -2533,27 +2588,27 @@ pub extern "C" fn zerobus_stream_ingest_json_records_async(
         Err(e) => early_error!(e),
     };
 
-    let stream_addr = stream as usize;
-    let user_data_addr = user_data as usize;
+    let stream_ptr = SendPtr(stream as *const ZerobusStream);
+    let user_data_ptr = SendPtrMut(user_data);
 
     RUNTIME.spawn(async move {
-        let stream_ref = unsafe { &*(stream_addr as *const ZerobusStream) };
+        let stream_ref = unsafe { stream_ptr.as_ref() };
         let payloads: Vec<EncodedRecord> = json_vec.into_iter().map(EncodedRecord::Json).collect();
         let offset_res = stream_ref.ingest_records_offset(payloads).await;
 
-        let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
+        let user_data_raw = user_data_ptr.as_ptr();
         match offset_res {
             Ok(Some(offset)) => {
                 let result = CResult::success();
-                callback(user_data_ptr, offset, &result);
+                callback(user_data_raw, offset, &result);
             }
             Ok(None) => {
                 let result = CResult::success();
-                callback(user_data_ptr, -2, &result);
+                callback(user_data_raw, -2, &result);
             }
             Err(err) => {
                 let result = CResult::error(err);
-                callback(user_data_ptr, -1, &result);
+                callback(user_data_raw, -1, &result);
                 if !result.error_message.is_null() {
                     unsafe { let _ = CString::from_raw(result.error_message); }
                 }
@@ -2623,24 +2678,24 @@ pub extern "C" fn zerobus_stream_wait_for_offset_async(
         return;
     }
 
-    // Cast raw pointers to usize so they are Send across the thread boundary.
+    // Wrap raw pointers in Send-safe newtypes for the async thread boundary.
     // Safety: the caller guarantees `stream` stays alive until the callback fires.
-    let stream_addr = stream as usize;
-    let user_data_addr = user_data as usize;
+    let stream_ptr = SendPtr(stream as *const ZerobusStream);
+    let user_data_ptr = SendPtrMut(user_data);
 
     RUNTIME.spawn(async move {
-        let stream_ref = unsafe { &*(stream_addr as *const ZerobusStream) };
+        let stream_ref = unsafe { stream_ptr.as_ref() };
         let res = stream_ref.wait_for_offset(offset).await;
 
-        let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
+        let user_data_raw = user_data_ptr.as_ptr();
         match res {
             Ok(()) => {
                 let result = CResult::success();
-                callback(user_data_ptr, &result);
+                callback(user_data_raw, &result);
             }
             Err(err) => {
                 let result = CResult::error(err);
-                callback(user_data_ptr, &result);
+                callback(user_data_raw, &result);
                 if !result.error_message.is_null() {
                     unsafe { let _ = CString::from_raw(result.error_message); }
                 }
@@ -2705,22 +2760,22 @@ pub extern "C" fn zerobus_stream_flush_async(
         return;
     }
 
-    let stream_addr = stream as usize;
-    let user_data_addr = user_data as usize;
+    let stream_ptr = SendPtr(stream as *const ZerobusStream);
+    let user_data_ptr = SendPtrMut(user_data);
 
     RUNTIME.spawn(async move {
-        let stream_ref = unsafe { &*(stream_addr as *const ZerobusStream) };
+        let stream_ref = unsafe { stream_ptr.as_ref() };
         let res = stream_ref.flush().await;
 
-        let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
+        let user_data_raw = user_data_ptr.as_ptr();
         match res {
             Ok(_) => {
                 let result = CResult::success();
-                callback(user_data_ptr, &result);
+                callback(user_data_raw, &result);
             }
             Err(err) => {
                 let result = CResult::error(err);
-                callback(user_data_ptr, &result);
+                callback(user_data_raw, &result);
                 if !result.error_message.is_null() {
                     unsafe { let _ = CString::from_raw(result.error_message); }
                 }
@@ -2878,24 +2933,24 @@ pub extern "C" fn zerobus_stream_close_async(
         return;
     }
 
-    // Cast raw pointers to usize so they are Send across the thread boundary.
+    // Wrap raw pointers in Send-safe newtypes for the async thread boundary.
     // Safety: the caller guarantees `stream` stays alive until the callback fires.
-    let stream_addr = stream as usize;
-    let user_data_addr = user_data as usize;
+    let stream_ptr = SendPtrMut(stream as *mut ZerobusStream);
+    let user_data_ptr = SendPtrMut(user_data);
 
     RUNTIME.spawn(async move {
-        let stream_ref = unsafe { &mut *(stream_addr as *mut ZerobusStream) };
+        let stream_ref = unsafe { stream_ptr.as_mut() };
         let res = stream_ref.close().await;
 
-        let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
+        let user_data_raw = user_data_ptr.as_ptr();
         match res {
             Ok(_) => {
                 let result = CResult::success();
-                callback(user_data_ptr, &result);
+                callback(user_data_raw, &result);
             }
             Err(err) => {
                 let result = CResult::error(err);
-                callback(user_data_ptr, &result);
+                callback(user_data_raw, &result);
                 if !result.error_message.is_null() {
                     unsafe { let _ = CString::from_raw(result.error_message); }
                 }
