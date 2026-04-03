@@ -42,18 +42,16 @@ mod tests;
 /// - The pointed-to data remains valid for the duration of use across the
 ///   thread boundary.
 /// - Access to the pointed-to data is properly synchronised.
-#[derive(Clone, Copy)]
 struct SendPtr<T>(*const T);
 unsafe impl<T> Send for SendPtr<T> {}
 
-#[allow(clippy::wrong_self_convention)]
 impl<T> SendPtr<T> {
     /// Dereference the pointer to a shared reference.
     ///
     /// # Safety
     /// The pointer must be non-null, properly aligned, and the pointee must
     /// be alive for the lifetime of the returned reference.
-    unsafe fn as_ref<'a>(self) -> &'a T {
+    unsafe fn as_ref<'a>(&self) -> &'a T {
         unsafe { &*self.0 }
     }
 }
