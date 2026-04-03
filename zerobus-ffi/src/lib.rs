@@ -64,23 +64,21 @@ impl<T> SendPtr<T> {
 /// # Safety
 /// Same invariants as [`SendPtr`], plus the caller must ensure exclusive
 /// access when calling [`as_mut`](Self::as_mut).
-#[derive(Clone, Copy)]
 struct SendPtrMut<T>(*mut T);
 unsafe impl<T> Send for SendPtrMut<T> {}
 
-#[allow(clippy::wrong_self_convention)]
 impl<T> SendPtrMut<T> {
     /// Dereference the pointer to a mutable reference.
     ///
     /// # Safety
     /// The pointer must be non-null, properly aligned, the pointee must be
     /// alive, and the caller must have exclusive access.
-    unsafe fn as_mut<'a>(self) -> &'a mut T {
+    unsafe fn as_mut<'a>(&self) -> &'a mut T {
         unsafe { &mut *self.0 }
     }
 
     /// Return the raw mutable pointer.
-    fn as_ptr(self) -> *mut T {
+    fn as_ptr(&self) -> *mut T {
         self.0
     }
 }
