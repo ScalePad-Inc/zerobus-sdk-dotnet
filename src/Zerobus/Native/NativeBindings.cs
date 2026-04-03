@@ -119,6 +119,37 @@ internal struct CRecordArray
 internal delegate CHeaders HeadersProviderCallback(IntPtr userData);
 
 /// <summary>
+/// Callback invoked when async stream creation completes.
+/// <para><paramref name="stream"/> is <see cref="IntPtr.Zero"/> on error.</para>
+/// <para>On success the caller owns <paramref name="stream"/> and must free it with
+/// <see cref="NativeMethods.StreamFree"/>.</para>
+/// <para><paramref name="result"/> is a transient pointer valid only for the duration of
+/// the callback — do not store it. <c>result->error_message</c> is owned by Rust and
+/// must NOT be freed by the caller.</para>
+/// </summary>
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+internal unsafe delegate void CreateStreamCallback(IntPtr userData, IntPtr stream, CResult* result);
+
+/// <summary>
+/// Callback invoked when an async proto record ingest completes.
+/// <para><paramref name="offset"/> is -1 on error; check <paramref name="result"/> for details.</para>
+/// <para><paramref name="result"/> is a transient pointer valid only for the duration of
+/// the callback — do not store it. <c>result->error_message</c> is owned by Rust and
+/// must NOT be freed by the caller.</para>
+/// </summary>
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+internal unsafe delegate void IngestRecordCallback(IntPtr userData, long offset, CResult* result);
+
+/// <summary>
+/// Callback invoked when an async void operation completes.
+/// <para><paramref name="result"/> is a transient pointer valid only for the duration of
+/// the callback — do not store it. <c>result->error_message</c> is owned by Rust and
+/// must NOT be freed by the caller.</para>
+/// </summary>
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+internal unsafe delegate void VoidOperationCallback(IntPtr userData, CResult* result);
+
+/// <summary>
 /// P/Invoke declarations for the zerobus_ffi native library.
 /// </summary>
 internal static partial class NativeMethods
@@ -190,6 +221,18 @@ internal static partial class NativeMethods
         ref CStreamConfigurationOptions options,
         ref CResult result);
 
+    [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_sdk_create_stream_async")]
+    public static extern unsafe void SdkCreateStreamAsync(
+        IntPtr sdk,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string tableName,
+        byte* descriptorProtoBytes,
+        nuint descriptorProtoLen,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string clientId,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string clientSecret,
+        ref CStreamConfigurationOptions options,
+        CreateStreamCallback callback,
+        IntPtr userData);
+
     [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_sdk_create_stream_with_headers_provider")]
     public static extern unsafe IntPtr SdkCreateStreamWithHeadersProvider(
         IntPtr sdk,
@@ -201,11 +244,30 @@ internal static partial class NativeMethods
         ref CStreamConfigurationOptions options,
         ref CResult result);
 
+    [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_sdk_create_stream_with_headers_provider_async")]
+    public static extern unsafe void SdkCreateStreamWithHeadersProviderAsync(
+        IntPtr sdk,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string tableName,
+        byte* descriptorProtoBytes,
+        nuint descriptorProtoLen,
+        HeadersProviderCallback headersCallback,
+        IntPtr headersUserData,
+        ref CStreamConfigurationOptions options,
+        CreateStreamCallback callback,
+        IntPtr completionUserData);
+
     [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_sdk_recreate_stream")]
     public static extern IntPtr SdkRecreateStream(
         IntPtr sdk,
         IntPtr stream,
         ref CResult result);
+
+    [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_sdk_recreate_stream_async")]
+    public static extern void SdkRecreateStreamAsync(
+        IntPtr sdk,
+        IntPtr stream,
+        CreateStreamCallback callback,
+        IntPtr userData);
 
     [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_stream_free")]
     public static extern void StreamFree(IntPtr stream);
@@ -219,11 +281,26 @@ internal static partial class NativeMethods
         nuint dataLen,
         ref CResult result);
 
+    [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_stream_ingest_proto_record_async")]
+    public static extern unsafe void StreamIngestProtoRecordAsync(
+        IntPtr stream,
+        byte* data,
+        nuint dataLen,
+        IngestRecordCallback callback,
+        IntPtr userData);
+
     [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_stream_ingest_json_record")]
     public static extern long StreamIngestJsonRecord(
         IntPtr stream,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string jsonData,
         ref CResult result);
+
+    [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_stream_ingest_json_record_async")]
+    public static extern void StreamIngestJsonRecordAsync(
+        IntPtr stream,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string jsonData,
+        IngestRecordCallback callback,
+        IntPtr userData);
 
     [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_stream_ingest_proto_records")]
     public static extern unsafe long StreamIngestProtoRecords(
@@ -233,12 +310,29 @@ internal static partial class NativeMethods
         nuint numRecords,
         ref CResult result);
 
+    [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_stream_ingest_proto_records_async")]
+    public static extern unsafe void StreamIngestProtoRecordsAsync(
+        IntPtr stream,
+        byte** records,
+        nuint* recordLens,
+        nuint numRecords,
+        IngestRecordCallback callback,
+        IntPtr userData);
+
     [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_stream_ingest_json_records")]
     public static extern unsafe long StreamIngestJsonRecords(
         IntPtr stream,
         byte** jsonRecords,
         nuint numRecords,
         ref CResult result);
+
+    [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_stream_ingest_json_records_async")]
+    public static extern unsafe void StreamIngestJsonRecordsAsync(
+        IntPtr stream,
+        byte** jsonRecords,
+        nuint numRecords,
+        IngestRecordCallback callback,
+        IntPtr userData);
 
     // --- Acknowledgment / flush ---
 
@@ -249,9 +343,19 @@ internal static partial class NativeMethods
         long offset,
         ref CResult result);
 
+    [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_stream_wait_for_offset_async")]
+    public static extern void StreamWaitForOffsetAsync(
+        IntPtr stream,
+        long offset,
+        VoidOperationCallback callback,
+        IntPtr userData);
+
     [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_stream_flush")]
     [return: MarshalAs(UnmanagedType.U1)]
     public static extern bool StreamFlush(IntPtr stream, ref CResult result);
+
+    [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_stream_flush_async")]
+    public static extern void StreamFlushAsync(IntPtr stream, VoidOperationCallback callback, IntPtr userData);
 
     [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_stream_get_unacked_records")]
     public static extern CRecordArray StreamGetUnackedRecords(IntPtr stream, ref CResult result);
@@ -264,6 +368,9 @@ internal static partial class NativeMethods
     [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_stream_close")]
     [return: MarshalAs(UnmanagedType.U1)]
     public static extern bool StreamClose(IntPtr stream, ref CResult result);
+
+    [DllImport(LibName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "zerobus_stream_close_async")]
+    public static extern void StreamCloseAsync(IntPtr stream, VoidOperationCallback callback, IntPtr userData);
 
     // --- Memory management ---
 

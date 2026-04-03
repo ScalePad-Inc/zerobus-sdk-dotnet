@@ -48,6 +48,36 @@ internal static class NativeInterop
     }
 
     /// <summary>
+    /// Converts a transient <see cref="CResult"/> pointer (valid only for the duration of
+    /// a native callback) to a <see cref="ZerobusException"/>.
+    /// Unlike <see cref="ToException(ref CResult)"/>, this overload does <b>not</b> free
+    /// the error message — Rust owns and frees it after the callback returns.
+    /// </summary>
+    private static unsafe ZerobusException ToException(CResult* result)
+    {
+        var message = result->ErrorMessage != IntPtr.Zero
+            ? Marshal.PtrToStringUTF8(result->ErrorMessage) ?? "unknown error"
+            : "unknown error";
+        return new ZerobusException(message, result->IsRetryable);
+    }
+
+    private static unsafe void ApplyResult(TaskCompletionSource tcs, CResult* result)
+    {
+        if (result->Success)
+            tcs.TrySetResult();
+        else
+            tcs.TrySetException(ToException(result));
+    }
+
+    private static unsafe void ApplyResult<T>(TaskCompletionSource<T> tcs, CResult* result, T successValue)
+    {
+        if (result->Success)
+            tcs.TrySetResult(successValue);
+        else
+            tcs.TrySetException(ToException(result));
+    }
+
+    /// <summary>
     /// Creates a new SDK instance.
     /// </summary>
     public static IntPtr SdkNew(string zerobusEndpoint, string unityCatalogUrl)
@@ -101,6 +131,57 @@ internal static class NativeInterop
     }
 
     /// <summary>
+    /// Creates a stream with OAuth credentials asynchronously.
+    /// Returns immediately; the returned <see cref="Task{IntPtr}"/> completes on the Tokio
+    /// thread when stream creation succeeds or fails.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="descriptorProto"/> is copied by Rust before this method returns, so
+    /// the span does not need to remain valid after the call.
+    /// </remarks>
+    public static unsafe Task<IntPtr> SdkCreateStreamAsync(
+        IntPtr sdkPtr,
+        string tableName,
+        ReadOnlySpan<byte> descriptorProto,
+        string clientId,
+        string clientSecret,
+        ref CStreamConfigurationOptions options)
+    {
+        var tcs = new TaskCompletionSource<IntPtr>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        CreateStreamCallback callbackDelegate = (_, stream, result) =>
+        {
+            ApplyResult(tcs, result, stream);
+        };
+
+        var handle = GCHandle.Alloc(callbackDelegate);
+
+        fixed (byte* descPtr = descriptorProto)
+        {
+            NativeMethods.SdkCreateStreamAsync(
+                sdkPtr,
+                tableName,
+                descPtr,
+                (nuint)descriptorProto.Length,
+                clientId,
+                clientSecret,
+                ref options,
+                callbackDelegate,
+                IntPtr.Zero);
+        }
+
+        _ = tcs.Task.ContinueWith(
+            _ =>
+            {
+                if (handle.IsAllocated)
+                    handle.Free();
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
+
+        return tcs.Task;
+    }
+
+    /// <summary>
     /// Creates a stream with a custom headers provider callback.
     /// </summary>
     public static unsafe IntPtr SdkCreateStreamWithHeadersProvider(
@@ -137,6 +218,58 @@ internal static class NativeInterop
     }
 
     /// <summary>
+    /// Creates a stream with a custom headers provider callback asynchronously.
+    /// Returns immediately; the returned <see cref="Task{IntPtr}"/> completes on the Tokio
+    /// thread when stream creation succeeds or fails.
+    /// </summary>
+    /// <remarks>
+    /// <para><paramref name="headersCallback"/> and the <paramref name="headersUserData"/> it
+    /// references must remain valid until the returned task completes.</para>
+    /// <para><paramref name="descriptorProto"/> is copied by Rust before this method returns.</para>
+    /// </remarks>
+    public static unsafe Task<IntPtr> SdkCreateStreamWithHeadersProviderAsync(
+        IntPtr sdkPtr,
+        string tableName,
+        ReadOnlySpan<byte> descriptorProto,
+        HeadersProviderCallback headersCallback,
+        IntPtr headersUserData,
+        ref CStreamConfigurationOptions options)
+    {
+        var tcs = new TaskCompletionSource<IntPtr>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        CreateStreamCallback callbackDelegate = (_, stream, result) =>
+        {
+            ApplyResult(tcs, result, stream);
+        };
+
+        var handle = GCHandle.Alloc(callbackDelegate);
+
+        fixed (byte* descPtr = descriptorProto)
+        {
+            NativeMethods.SdkCreateStreamWithHeadersProviderAsync(
+                sdkPtr,
+                tableName,
+                descPtr,
+                (nuint)descriptorProto.Length,
+                headersCallback,
+                headersUserData,
+                ref options,
+                callbackDelegate,
+                IntPtr.Zero);
+        }
+
+        _ = tcs.Task.ContinueWith(
+            _ =>
+            {
+                if (handle.IsAllocated)
+                    handle.Free();
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
+
+        return tcs.Task;
+    }
+
+    /// <summary>
     /// Recreates a stream from an existing stream.
     /// </summary>
     public static IntPtr SdkRecreateStream(IntPtr sdkPtr, IntPtr streamPtr)
@@ -151,6 +284,123 @@ internal static class NativeInterop
         }
 
         return ptr;
+    }
+
+    /// <summary>
+    /// Recreates a stream from an existing stream asynchronously.
+    /// Returns immediately; the returned <see cref="Task{IntPtr}"/> completes on the Tokio
+    /// thread when recreation succeeds or fails.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="sdkPtr"/> and <paramref name="streamPtr"/> must remain valid until
+    /// the returned task completes.
+    /// </remarks>
+    public static unsafe Task<IntPtr> SdkRecreateStreamAsync(IntPtr sdkPtr, IntPtr streamPtr)
+    {
+        var tcs = new TaskCompletionSource<IntPtr>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        CreateStreamCallback callbackDelegate = (_, stream, result) =>
+        {
+            ApplyResult(tcs, result, stream);
+        };
+
+        var handle = GCHandle.Alloc(callbackDelegate);
+
+        NativeMethods.SdkRecreateStreamAsync(
+            sdkPtr,
+            streamPtr,
+            callbackDelegate,
+            IntPtr.Zero);
+
+        _ = tcs.Task.ContinueWith(
+            _ =>
+            {
+                if (handle.IsAllocated)
+                    handle.Free();
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
+
+        return tcs.Task;
+    }
+
+    /// <summary>
+    /// Ingests a single protobuf record asynchronously and returns the offset.
+    /// Returns immediately; the returned <see cref="Task{Int64}"/> completes on the Tokio
+    /// thread when the ingest succeeds or fails.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="data"/> is copied by Rust before this method returns, so
+    /// the span does not need to remain valid after the call.
+    /// </remarks>
+    public static unsafe Task<long> StreamIngestProtoRecordAsync(IntPtr streamPtr, ReadOnlySpan<byte> data)
+    {
+        if (data.IsEmpty)
+            throw new ZerobusException("empty data", isRetryable: false);
+
+        var tcs = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        IngestRecordCallback callbackDelegate = (_, offset, result) =>
+        {
+            ApplyResult(tcs, result, offset);
+        };
+
+        var handle = GCHandle.Alloc(callbackDelegate);
+
+        fixed (byte* dataPtr = data)
+        {
+            NativeMethods.StreamIngestProtoRecordAsync(
+                streamPtr,
+                dataPtr,
+                (nuint)data.Length,
+                callbackDelegate,
+                IntPtr.Zero);
+        }
+
+        _ = tcs.Task.ContinueWith(
+            _ =>
+            {
+                if (handle.IsAllocated)
+                    handle.Free();
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
+
+        return tcs.Task;
+    }
+
+    /// <summary>
+    /// Ingests a single JSON record asynchronously and returns the offset.
+    /// Returns immediately; the returned <see cref="Task{Int64}"/> completes on the Tokio
+    /// thread when the ingest succeeds or fails.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="jsonData"/> is copied by Rust before this method returns.
+    /// </remarks>
+    public static unsafe Task<long> StreamIngestJsonRecordAsync(IntPtr streamPtr, string jsonData)
+    {
+        var tcs = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        IngestRecordCallback callbackDelegate = (_, offset, result) =>
+        {
+            ApplyResult(tcs, result, offset);
+        };
+
+        var handle = GCHandle.Alloc(callbackDelegate);
+
+        NativeMethods.StreamIngestJsonRecordAsync(
+            streamPtr,
+            jsonData,
+            callbackDelegate,
+            IntPtr.Zero);
+
+        _ = tcs.Task.ContinueWith(
+            _ =>
+            {
+                if (handle.IsAllocated)
+                    handle.Free();
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
+
+        return tcs.Task;
     }
 
     /// <summary>
@@ -251,6 +501,77 @@ internal static class NativeInterop
     }
 
     /// <summary>
+    /// Ingests a batch of protobuf records asynchronously and returns the last offset.
+    /// Returns immediately; the returned <see cref="Task{Int64}"/> completes on the Tokio
+    /// thread when the ingest succeeds or fails.
+    /// </summary>
+    /// <remarks>
+    /// All record data is copied by Rust before this method returns.
+    /// </remarks>
+    public static unsafe Task<long> StreamIngestProtoRecordsAsync(IntPtr streamPtr, byte[][] records)
+    {
+        if (records.Length == 0)
+            return Task.FromResult(-1L);
+
+        var tcs = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var handles = new GCHandle[records.Length];
+        var ptrs = stackalloc byte*[records.Length];
+        var lens = stackalloc nuint[records.Length];
+
+        for (int i = 0; i < records.Length; i++)
+        {
+            handles[i] = GCHandle.Alloc(records[i], GCHandleType.Pinned);
+            ptrs[i] = (byte*)handles[i].AddrOfPinnedObject();
+            lens[i] = (nuint)records[i].Length;
+        }
+
+        IngestRecordCallback callbackDelegate = (_, offset, result) =>
+        {
+            ApplyResult(tcs, result, offset == -2 ? -1 : offset);
+        };
+
+        var callbackHandle = GCHandle.Alloc(callbackDelegate);
+
+        try
+        {
+            NativeMethods.StreamIngestProtoRecordsAsync(
+                streamPtr,
+                ptrs,
+                lens,
+                (nuint)records.Length,
+                callbackDelegate,
+                IntPtr.Zero);
+        }
+        catch
+        {
+            if (callbackHandle.IsAllocated)
+                callbackHandle.Free();
+
+            throw;
+        }
+        finally
+        {
+            for (int i = 0; i < handles.Length; i++)
+            {
+                if (handles[i].IsAllocated)
+                    handles[i].Free();
+            }
+        }
+
+        // Ensure the callback delegate's GCHandle is freed once the operation completes.
+        _ = tcs.Task.ContinueWith(
+            _ =>
+            {
+                if (callbackHandle.IsAllocated)
+                    callbackHandle.Free();
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
+
+        return tcs.Task;
+    }
+
+    /// <summary>
     /// Ingests a batch of JSON records and returns the last offset.
     /// </summary>
     public static unsafe long StreamIngestJsonRecords(IntPtr streamPtr, string[] records)
@@ -262,7 +583,6 @@ internal static class NativeInterop
         var numRecords = (nuint)records.Length;
 
         // Encode each string as null-terminated UTF-8 and pin
-        var encoded = new byte[records.Length][];
         var handles = new GCHandle[records.Length];
         var ptrs = stackalloc byte*[records.Length];
 
@@ -272,7 +592,6 @@ internal static class NativeInterop
             {
                 // Encode with null terminator
                 var utf8 = Encoding.UTF8.GetBytes(records[i] + '\0');
-                encoded[i] = utf8;
                 handles[i] = GCHandle.Alloc(utf8, GCHandleType.Pinned);
                 ptrs[i] = (byte*)handles[i].AddrOfPinnedObject();
             }
@@ -303,6 +622,100 @@ internal static class NativeInterop
     }
 
     /// <summary>
+    /// Ingests a batch of JSON records asynchronously and returns the last offset.
+    /// Returns immediately; the returned <see cref="Task{Int64}"/> completes on the Tokio
+    /// thread when the ingest succeeds or fails.
+    /// </summary>
+    /// <remarks>
+    /// All JSON strings are copied by Rust before this method returns.
+    /// </remarks>
+    public static unsafe Task<long> StreamIngestJsonRecordsAsync(IntPtr streamPtr, string[] records)
+    {
+        if (records.Length == 0)
+            return Task.FromResult(-1L);
+
+        var tcs = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var handles = new GCHandle[records.Length];
+        var ptrs = stackalloc byte*[records.Length];
+
+        for (int i = 0; i < records.Length; i++)
+        {
+            var utf8 = Encoding.UTF8.GetBytes(records[i] + '\0');
+            handles[i] = GCHandle.Alloc(utf8, GCHandleType.Pinned);
+            ptrs[i] = (byte*)handles[i].AddrOfPinnedObject();
+        }
+
+        IngestRecordCallback callbackDelegate = (_, offset, result) =>
+        {
+            ApplyResult(tcs, result, offset == -2 ? -1 : offset);
+        };
+
+        var callbackHandle = GCHandle.Alloc(callbackDelegate);
+
+        try
+        {
+            NativeMethods.StreamIngestJsonRecordsAsync(
+                streamPtr,
+                ptrs,
+                (nuint)records.Length,
+                callbackDelegate,
+                IntPtr.Zero);
+        }
+        finally
+        {
+            for (int i = 0; i < handles.Length; i++)
+            {
+                if (handles[i].IsAllocated)
+                    handles[i].Free();
+            }
+        }
+
+        _ = tcs.Task.ContinueWith(
+            _ =>
+            {
+                if (callbackHandle.IsAllocated)
+                    callbackHandle.Free();
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
+
+        return tcs.Task;
+    }
+
+    /// <summary>
+    /// Waits for a specific offset to be acknowledged asynchronously.
+    /// Returns immediately; the returned <see cref="Task"/> completes on the Tokio
+    /// thread when the acknowledgment arrives or an error occurs.
+    /// </summary>
+    public static unsafe Task StreamWaitForOffsetAsync(IntPtr streamPtr, long offset)
+    {
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        VoidOperationCallback callbackDelegate = (_, result) =>
+        {
+            ApplyResult(tcs, result);
+        };
+
+        var handle = GCHandle.Alloc(callbackDelegate);
+
+        NativeMethods.StreamWaitForOffsetAsync(
+            streamPtr,
+            offset,
+            callbackDelegate,
+            IntPtr.Zero);
+
+        _ = tcs.Task.ContinueWith(
+            _ =>
+            {
+                if (handle.IsAllocated)
+                    handle.Free();
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
+
+        return tcs.Task;
+    }
+
+    /// <summary>
     /// Waits for a specific offset to be acknowledged.
     /// </summary>
     public static void StreamWaitForOffset(IntPtr streamPtr, long offset)
@@ -324,6 +737,38 @@ internal static class NativeInterop
 
         if (!success)
             ThrowIfFailed(ref result);
+    }
+
+    /// <summary>
+    /// Flushes all pending records asynchronously.
+    /// Returns immediately; the returned <see cref="Task"/> completes on the Tokio
+    /// thread when the flush succeeds or fails.
+    /// </summary>
+    public static unsafe Task StreamFlushAsync(IntPtr streamPtr)
+    {
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        VoidOperationCallback callbackDelegate = (_, result) =>
+        {
+            ApplyResult(tcs, result);
+        };
+
+        var handle = GCHandle.Alloc(callbackDelegate);
+
+        NativeMethods.StreamFlushAsync(
+            streamPtr,
+            callbackDelegate,
+            IntPtr.Zero);
+
+        _ = tcs.Task.ContinueWith(
+            _ =>
+            {
+                if (handle.IsAllocated)
+                    handle.Free();
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
+
+        return tcs.Task;
     }
 
     /// <summary>
@@ -364,6 +809,38 @@ internal static class NativeInterop
 
         NativeMethods.FreeRecordArray(cArray);
         return records;
+    }
+
+    /// <summary>
+    /// Closes the stream gracefully asynchronously.
+    /// Returns immediately; the returned <see cref="Task"/> completes on the Tokio
+    /// thread when the close succeeds or fails.
+    /// </summary>
+    public static unsafe Task StreamCloseAsync(IntPtr streamPtr)
+    {
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        VoidOperationCallback callbackDelegate = (_, result) =>
+        {
+            ApplyResult(tcs, result);
+        };
+
+        var handle = GCHandle.Alloc(callbackDelegate);
+
+        NativeMethods.StreamCloseAsync(
+            streamPtr,
+            callbackDelegate,
+            IntPtr.Zero);
+
+        _ = tcs.Task.ContinueWith(
+            _ =>
+            {
+                if (handle.IsAllocated)
+                    handle.Free();
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
+
+        return tcs.Task;
     }
 
     /// <summary>
