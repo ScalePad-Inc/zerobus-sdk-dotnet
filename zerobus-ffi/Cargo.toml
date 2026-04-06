@@ -14,7 +14,7 @@ crate-type = ["staticlib", "cdylib"]
 databricks-zerobus-ingest-sdk = { version="1.0.1", features = ["arrow-flight", "testing"] }
 
 # Arrow IPC for serializing/deserializing RecordBatches across the FFI boundary
-arrow-ipc = { version = "56.2.0", default-features = false }
+arrow-ipc = { version = "58.1.0", default-features = false }
 
 # FFI helpers
 tokio = { version = "1.51", features = ["rt", "rt-multi-thread"] }
